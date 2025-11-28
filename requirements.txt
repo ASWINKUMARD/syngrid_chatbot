@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-dotenv
+beautifulsoup4
+requests
+langchain
+langchain-community
+langchain-huggingface
+chromadb
+sentence-transformers
+pydantic
+pydantic[email]
+typing-extensions
+nest-asyncio
