@@ -1,23 +1,18 @@
-# Core FastAPI
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
+fastapi
+uvicorn[standard]
+gunicorn
+python-dotenv
 
-# LangChain (minimal)
-langchain==0.3.7
-langchain-community==0.3.5
-langchain-text-splitters==0.3.2
-langchain-huggingface==0.1.2
+requests
+beautifulsoup4
 
-# Vector Store (optimized)
-chromadb==0.5.23
-sentence-transformers==3.3.1
+langchain==0.1.15
+langchain-community==0.0.34
+langchain-huggingface==0.0.6
+langchain-text-splitters==0.0.1
 
-# Utilities
-beautifulsoup4==4.12.3
-requests==2.32.3
-python-dotenv==1.0.1
+chromadb==0.4.22
+sentence-transformers==2.5.1
+pydantic==1.10.13
+typing-extensions
 
-# ML/Embeddings (CPU-optimized)
-torch==2.5.1+cpu --find-links https://download.pytorch.org/whl/torch_stable.html
-huggingface-hub==0.26.2
