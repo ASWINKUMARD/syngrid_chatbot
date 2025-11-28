@@ -7,8 +7,6 @@ Original file is located at
     https://colab.research.google.com/drive/1q31xPIuketdM7UwUIXtJh1XpQ2eZOLyT
 """
 
-!pip install fastapi uvicorn python-dotenv beautifulsoup4 requests langchain langchain-community langchain-huggingface chromadb sentence-transformers pydantic typing-extensions certifi
-
 import os
 import json
 import requests
@@ -333,11 +331,6 @@ async function submitInfo(){
 </html>
 """
 
-
-# ==========================================
-# RUN UVICORN (RENDER USES GUNICORN)
-# ==========================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=False)
-
