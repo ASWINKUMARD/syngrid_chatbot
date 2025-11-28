@@ -8,11 +8,12 @@ beautifulsoup4
 
 langchain==0.1.15
 langchain-community==0.0.34
-langchain-huggingface==0.0.6
 langchain-text-splitters==0.0.1
+langchain-huggingface==0.1.2
 
 chromadb==0.4.22
 sentence-transformers==2.5.1
+
 pydantic==1.10.13
 typing-extensions
 
