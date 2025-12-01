@@ -110,7 +110,7 @@ def save_user_contact(name, email, phone):
         return False
 
 # Constants
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions"
 SYNGRID_WEBSITE = "https://syngrid.com/"
 MODEL = "kwaipilot/kat-coder-pro:free"
