@@ -1,16 +1,9 @@
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic[email]==2.5.3
-sqlalchemy==2.0.25
-psycopg2-binary==2.9.9
-beautifulsoup4==4.12.3
-requests==2.31.0
-langchain==0.1.4
-langchain-community==0.0.16
-langchain-huggingface==0.0.1
-chromadb==0.4.22
-sentence-transformers==2.3.1
-torch==2.1.2
-transformers==4.37.2
-lxml==5.1.0
+services:
+  - type: web
+    name: syngrid-ai
+    env: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    autoDeploy: true
