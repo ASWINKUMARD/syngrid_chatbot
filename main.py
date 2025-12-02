@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 from collections import deque
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
@@ -12,7 +11,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import re
 import os
 import time
-import torch
+import numpy as np
 
 # Page Configuration
 st.set_page_config(
@@ -314,15 +313,14 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             )
             chunks = splitter.split_text(content)
 
-            # CRITICAL FIX: Use sentence-transformers directly to avoid meta tensor error
+            # CRITICAL FIX: Use sentence-transformers with proper initialization
             from sentence_transformers import SentenceTransformer
+            import numpy as np
             
-            # Download and cache the model properly
-            @st.cache_resource
-            def load_embedding_model():
-                return SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
-            
-            embedding_model = load_embedding_model()
+            # Load model directly without caching decorator inside method
+            st.info("📦 Loading embedding model...")
+            embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+            st.success("✅ Embedding model loaded!")
             
             # Create custom embeddings class that works with the loaded model
             class CustomEmbeddings:
@@ -330,10 +328,20 @@ def initialize(self, url, max_pages=40, progress_callback=None):
                     self.model = model
                 
                 def embed_documents(self, texts):
-                    return self.model.encode(texts, normalize_embeddings=True).tolist()
+                    try:
+                        embeddings = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+                        return embeddings.tolist()
+                    except Exception as e:
+                        st.error(f"Embedding error: {str(e)}")
+                        raise
                 
                 def embed_query(self, text):
-                    return self.model.encode([text], normalize_embeddings=True)[0].tolist()
+                    try:
+                        embedding = self.model.encode([text], normalize_embeddings=True, show_progress_bar=False)
+                        return embedding[0].tolist()
+                    except Exception as e:
+                        st.error(f"Query embedding error: {str(e)}")
+                        raise
             
             embeddings = CustomEmbeddings(embedding_model)
 
@@ -341,8 +349,12 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             chroma_dir = "./syngrid_chroma"
             if os.path.exists(chroma_dir):
                 import shutil
-                shutil.rmtree(chroma_dir)
+                try:
+                    shutil.rmtree(chroma_dir)
+                except Exception as e:
+                    st.warning(f"Could not remove old chroma directory: {str(e)}")
 
+            st.info("🗄️ Creating vector database...")
             vectorstore = Chroma.from_texts(
                 chunks, 
                 embedding=embeddings, 
@@ -351,12 +363,19 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             
             self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             self.status["ready"] = True
+            st.success("✅ Vector database created!")
             return True
             
+        except AttributeError as e:
+            st.error(f"❌ AttributeError: {str(e)}")
+            st.error("This usually means a library version mismatch. Check your requirements.txt")
+            import traceback
+            st.code(traceback.format_exc())
+            return False
         except Exception as e:
             st.error(f"❌ Initialization Error: {str(e)}")
             import traceback
-            st.error(f"Traceback: {traceback.format_exc()}")
+            st.code(traceback.format_exc())
             return False
 
 def ask(self, question):
