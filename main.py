@@ -21,142 +21,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for stunning UI
+# Custom CSS for UI
 st.markdown("""
 <style>
-    /* Main background gradient */
-    .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    /* Chat container */
-    .stChatFloatingInputContainer {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 10px;
-    }
-    
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%);
-    }
-    
-    /* Custom header */
-    .header-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        text-align: center;
-    }
-    
-    .header-title {
-        color: white;
-        font-size: 3rem;
-        font-weight: bold;
-        margin: 0;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-    
-    .header-subtitle {
-        color: rgba(255,255,255,0.9);
-        font-size: 1.2rem;
-        margin-top: 0.5rem;
-    }
-    
-    /* Status badges */
-    .status-badge {
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-weight: bold;
-        margin: 0.5rem;
-    }
-    
-    .status-ready {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-    }
-    
-    .status-loading {
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        color: white;
-    }
-    
-    /* Chat messages */
-    .stChatMessage {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-    }
-    
-    /* Metrics */
-    [data-testid="stMetricValue"] {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #667eea;
-    }
-    
-    /* Buttons */
-    .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 10px;
-        padding: 0.5rem 2rem;
-        font-weight: bold;
-        transition: transform 0.2s;
-    }
-    
-    .stButton>button:hover {
-        transform: scale(1.05);
-    }
-    
-    /* Info boxes */
-    .info-box {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border-left: 4px solid #667eea;
-    }
-    
-    /* Contact form */
-    .contact-form {
-        background: rgba(255, 255, 255, 0.95);
-        padding: 2rem;
-        border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    }
-    
-    /* Animations */
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.5; }
-    }
-    
-    .pulse {
-        animation: pulse 2s infinite;
-    }
-    
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-        width: 10px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: rgba(255, 255, 255, 0.1);
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 5px;
-    }
+    .main { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    [data-testid="stSidebar"] { background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%); }
+    .header-container { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem; border-radius: 20px; margin-bottom: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; }
+    .header-title { color: white; font-size: 3rem; font-weight: bold; margin: 0; }
+    .header-subtitle { color: rgba(255,255,255,0.9); font-size: 1.2rem; margin-top: 0.5rem; }
+    .status-badge { padding: 0.5rem 1rem; border-radius: 20px; font-weight: bold; }
+    .status-ready { background: #10b981; color: white; }
+    .status-loading { background: #f59e0b; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -190,45 +66,40 @@ SYNGRID_WEBSITE = "https://syngrid.com/"
 MODEL = "kwaipilot/kat-coder-pro:free"
 
 PRIORITY_PAGES = [
-    "", "about", "about-us", "services", "solutions", "products", 
-    "contact", "contact-us", "team", "careers", "blog", "case-studies",
-    "portfolio", "industries", "technology", "expertise", "what-we-do",
-    "who-we-are", "footer", "locations", "reach-us"
+    "", "about", "services", "solutions", "products", "contact", "team",
+    "careers", "blog", "case-studies", "portfolio", "industries",
+    "technology", "expertise", "what-we-do", "who-we-are", "footer"
 ]
 
 class SyngridAI:
     def __init__(self):
         self.retriever = None
         self.cache = {}
-        self.status = {"ready": False, "message": "Not initialized", "pages_scraped": 0}
+        self.status = {"ready": False, "pages_scraped": 0}
         self.scraped_content = {}
         self.company_info = {
-            'emails': set(),
-            'phones': set(),
-            'india_address': None,
-            'singapore_address': None,
-            'social_media': {}
+            'emails': set(), 'phones': set(),
+            'india_address': None, 'singapore_address': None
         }
 
     def clean_address(self, text):
         text = ' '.join(text.split())
         text = re.sub(r'(Corporate Office|Branch Office|Head Office|Registered Office)', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
+        return re.sub(r'\s+', ' ', text).strip()
 
     def extract_contact_info(self, soup, text, url):
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        emails = re.findall(email_pattern, text)
+        # Emails
+        emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', text)
         for email in emails:
             if not email.lower().endswith(('.png', '.jpg', '.gif')):
                 self.company_info['emails'].add(email.lower())
 
+        # Phones
         phone_patterns = [
             r'\+91\s*\d{5}\s*\d{5}',
-            r'\+\d{1,3}[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
-            r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}',
+            r'\+\d{1,3}[-.\s]?\d{3}[-.\s]?\d{3}[-.\s]?\d{4}',
+            r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
         ]
-
         for pattern in phone_patterns:
             phones = re.findall(pattern, text)
             for phone in phones:
@@ -236,253 +107,154 @@ class SyngridAI:
                 if 10 <= len(cleaned) <= 15:
                     self.company_info['phones'].add(phone.strip())
 
-        if any(keyword in url.lower() for keyword in ['contact', 'footer', 'about', 'reach']):
-            lines = text.split('\n')
+        # Detect addresses
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            low = line.lower()
+            if 'madurai' in low and '625' in line and not self.company_info['india_address']:
+                block = " ".join(lines[i-2:i+5])
+                cleaned = self.clean_address(block)
+                if 20 < len(cleaned) < 300:
+                    self.company_info['india_address'] = cleaned
 
-            if not self.company_info['india_address']:
-                for i, line in enumerate(lines):
-                    line_lower = line.lower()
-                    if ('tbi' in line_lower or 'madurai' in line_lower) and '625' in line:
-                        start = max(0, i - 2)
-                        end = min(len(lines), i + 5)
-                        address_parts = []
-                        for j in range(start, end):
-                            current_line = lines[j].strip()
-                            if current_line and len(current_line) > 5:
-                                if not any(skip in current_line.lower() for skip in ['career', 'job', 'hiring', 'vacancy']):
-                                    address_parts.append(current_line)
-                        if address_parts:
-                            full_address = ' '.join(address_parts)
-                            if 'madurai' in full_address.lower() and len(full_address) > 30:
-                                address_clean = self.clean_address(full_address)
-                                if 20 < len(address_clean) < 300:
-                                    self.company_info['india_address'] = address_clean
-                                    break
-
-            if not self.company_info['singapore_address']:
-                for i, line in enumerate(lines):
-                    line_lower = line.lower()
-                    if 'singapore' in line_lower and (re.search(r'\d{6}', line) or 'road' in line_lower):
-                        start = max(0, i - 2)
-                        end = min(len(lines), i + 5)
-                        address_parts = []
-                        for j in range(start, end):
-                            current_line = lines[j].strip()
-                            if current_line and len(current_line) > 5:
-                                if not any(skip in current_line.lower() for skip in ['career', 'job', 'hiring']):
-                                    address_parts.append(current_line)
-                        if address_parts:
-                            full_address = ' '.join(address_parts)
-                            if 'singapore' in full_address.lower() and len(full_address) > 30:
-                                address_clean = self.clean_address(full_address)
-                                if 20 < len(address_clean) < 300:
-                                    self.company_info['singapore_address'] = address_clean
-                                    break
-
+            if 'singapore' in low and re.search(r'\d{6}', line) and not self.company_info['singapore_address']:
+                block = " ".join(lines[i-2:i+5])
+                cleaned = self.clean_address(block)
+                if 20 < len(cleaned) < 300:
+                    self.company_info['singapore_address'] = cleaned
     def is_valid_url(self, url, base_domain):
         parsed = urlparse(url)
         if parsed.netloc != base_domain:
             return False
-        skip_patterns = [
+        skip = [
             r'\.pdf$', r'\.jpg$', r'\.png$', r'\.gif$', r'\.zip$',
-            r'/wp-admin/', r'/wp-content/(?!.*contact)', r'/wp-includes/',
-            r'/feed/', r'/rss/', r'/sitemap', r'/login', r'/register',
-            r'\.css$', r'\.js$', r'/cart/', r'/checkout/'
+            r'/wp-admin/', r'/wp-includes/', r'/login', r'/register',
+            r'/cart/', r'/checkout/', r'/feed/', r'/rss/'
         ]
-        for pattern in skip_patterns:
-            if re.search(pattern, url.lower()):
-                return False
-        return True
+        return not any(re.search(pattern, url.lower()) for pattern in skip)
 
     def extract_content(self, soup, url):
         content_dict = {'url': url, 'title': '', 'main_content': '', 'metadata': {}}
-        
-        title_tag = soup.find('title')
-        if title_tag:
-            content_dict['title'] = title_tag.get_text(strip=True)
 
-        meta_desc = soup.find('meta', attrs={'name': 'description'})
-        if meta_desc and meta_desc.get('content'):
-            content_dict['metadata']['description'] = meta_desc.get('content')
+        t = soup.find('title')
+        if t: content_dict['title'] = t.get_text(strip=True)
 
-        full_text = soup.get_text(separator='\n', strip=True)
+        meta = soup.find('meta', attrs={"name": "description"})
+        if meta and meta.get("content"):
+            content_dict['metadata']['description'] = meta["content"]
+
+        full_text = soup.get_text(separator="\n", strip=True)
         self.extract_contact_info(soup, full_text, url)
 
-        for tag in soup(['script', 'style', 'nav', 'aside', 'iframe', 'noscript', 'form', 'button']):
+        for tag in soup(['script', 'style', 'nav', 'aside', 'iframe', 'noscript', 'form']):
             tag.decompose()
 
         content_selectors = [
-            'main', 'article', '[role="main"]', '.content', '.main-content',
-            '#content', '#main', '.page-content', '.entry-content', '.post-content',
-            'footer', '.footer', '#footer'
+            "main", "article", "[role='main']", ".content",
+            ".main-content", "#content", "#main"
         ]
+        parts = []
+        for sel in content_selectors:
+            parts.extend(soup.select(sel))
 
-        content_parts = []
-        for selector in content_selectors:
-            elements = soup.select(selector)
-            for element in elements:
-                content_parts.append(element)
-
-        if not content_parts:
-            main_content = soup.find('body')
-        else:
-            main_content = soup.new_tag('div')
-            for part in content_parts:
-                main_content.append(part)
+        main_content = soup.find("body") if not parts else soup.new_tag("div")
+        if parts:
+            for p in parts:
+                main_content.append(p)
 
         if main_content:
-            headings = []
-            for heading in main_content.find_all(['h1', 'h2', 'h3', 'h4']):
-                heading_text = heading.get_text(strip=True)
-                if len(heading_text) > 3:
-                    headings.append(heading_text)
-
-            text = main_content.get_text(separator='\n', strip=True)
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
-
-            meaningful_lines = []
-            seen = set()
-            for line in lines:
-                if len(line) > 20 and line not in seen:
-                    meaningful_lines.append(line)
-                    seen.add(line)
-
-            content_dict['main_content'] = '\n'.join(meaningful_lines)
-            content_dict['metadata']['headings'] = headings
+            text = main_content.get_text(separator="\n", strip=True)
+            lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 20]
+            content_dict['main_content'] = "\n".join(lines)
 
         return content_dict
 
     def scrape_website(self, base_url, max_pages=40, progress_callback=None):
         visited = set()
         all_content = []
-        queue = deque()
+        q = deque()
         base_domain = urlparse(base_url).netloc
 
-        for page in PRIORITY_PAGES:
-            priority_url = urljoin(base_url, page)
-            queue.append(priority_url)
+        for p in PRIORITY_PAGES:
+            q.append(urljoin(base_url, p))
 
-        if base_url not in queue:
-            queue.append(base_url)
+        headers = {"User-Agent": "Mozilla/5.0"}
 
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        while q and len(visited) < max_pages:
+            url = q.popleft().split("#")[0].split("?")[0]
 
-        while queue and len(visited) < max_pages:
-            current_url = queue.popleft()
-            current_url = current_url.split('#')[0].split('?')[0]
-
-            if current_url in visited or len(visited) >= max_pages:
-                continue
-
-            if not self.is_valid_url(current_url, base_domain):
+            if url in visited or not self.is_valid_url(url, base_domain):
                 continue
 
             try:
-                resp = requests.get(current_url, headers=headers, timeout=15, allow_redirects=True)
-                if resp.status_code != 200:
+                r = requests.get(url, headers=headers, timeout=15)
+                if r.status_code != 200:
                     continue
 
-                visited.add(current_url)
-                
+                visited.add(url)
                 if progress_callback:
-                    progress_callback(len(visited), max_pages, current_url)
+                    progress_callback(len(visited), max_pages, url)
 
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                content_data = self.extract_content(soup, current_url)
+                soup = BeautifulSoup(r.text, "html.parser")
+                data = self.extract_content(soup, url)
 
-                if len(content_data['main_content']) > 100:
-                    formatted_content = f"""URL: {content_data['url']}\nTITLE: {content_data['title']}\n"""
-                    if content_data['metadata'].get('description'):
-                        formatted_content += f"DESCRIPTION: {content_data['metadata']['description']}\n"
-                    if content_data['metadata'].get('headings'):
-                        formatted_content += f"\nKEY SECTIONS: {', '.join(content_data['metadata']['headings'][:5])}\n"
-                    formatted_content += f"\nCONTENT:\n{content_data['main_content']}"
-                    all_content.append(formatted_content)
-                    self.scraped_content[current_url] = content_data
+                if len(data['main_content']) > 100:
+                    formatted = f"URL: {data['url']}\nTITLE: {data['title']}\n"
+                    if "description" in data['metadata']:
+                        formatted += f"DESCRIPTION: {data['metadata']['description']}\n"
+                    formatted += f"\nCONTENT:\n{data['main_content']}"
+                    all_content.append(formatted)
+                    self.scraped_content[url] = data
 
-                if len(visited) < max_pages:
-                    for link in soup.find_all('a', href=True):
-                        next_url = urljoin(current_url, link['href'])
-                        next_url = next_url.split('#')[0].split('?')[0]
-                        if (next_url not in visited and next_url not in queue and 
-                            self.is_valid_url(next_url, base_domain)):
-                            queue.append(next_url)
+                for link in soup.find_all("a", href=True):
+                    next_url = urljoin(url, link['href']).split("#")[0].split("?")[0]
+                    if next_url not in visited and self.is_valid_url(next_url, base_domain):
+                        q.append(next_url)
 
-            except Exception as e:
+            except Exception:
                 continue
 
         self.status["pages_scraped"] = len(visited)
-        contact_info_text = self.format_company_info()
-        if contact_info_text:
-            all_content.insert(0, contact_info_text)
 
-        separator = "=" * 80
-        return f"\n\n{separator}\n\n".join(all_content)
+        if self.company_info['emails'] or self.company_info['phones']:
+            header = "COMPANY CONTACT INFORMATION\n" + "="*50 + "\n\n"
+            if self.company_info['india_address']:
+                header += f"INDIA OFFICE:\n{self.company_info['india_address']}\n\n"
+            if self.company_info['singapore_address']:
+                header += f"SINGAPORE OFFICE:\n{self.company_info['singapore_address']}\n\n"
+            for e in sorted(self.company_info['emails']):
+                header += f"Email: {e}\n"
+            for p in sorted(self.company_info['phones']):
+                header += f"Phone: {p}\n"
+            all_content.insert(0, header)
 
-    def format_company_info(self):
-        if not any([self.company_info['emails'], self.company_info['phones'],
-                   self.company_info['india_address'], self.company_info['singapore_address']]):
-            return ""
-
-        info_text = "COMPANY CONTACT INFORMATION\n" + "="*50 + "\n\n"
-
-        if self.company_info['india_address']:
-            info_text += f"INDIA OFFICE (Corporate Office):\n  {self.company_info['india_address']}\n\n"
-
-        if self.company_info['singapore_address']:
-            info_text += f"SINGAPORE OFFICE:\n  {self.company_info['singapore_address']}\n\n"
-
-        if self.company_info['emails']:
-            info_text += "EMAIL ADDRESSES:\n"
-            for email in sorted(self.company_info['emails']):
-                info_text += f"  • {email}\n"
-            info_text += "\n"
-
-        if self.company_info['phones']:
-            info_text += "PHONE NUMBERS:\n"
-            for phone in sorted(self.company_info['phones']):
-                info_text += f"  • {phone}\n"
-            info_text += "\n"
-
-        return info_text
+        return ("\n\n" + "="*80 + "\n\n").join(all_content)
 
     def get_company_contact_info(self):
-        if not any([self.company_info['emails'], self.company_info['phones'],
-                   self.company_info['india_address'], self.company_info['singapore_address']]):
-            return "Contact information not found. Please visit the company website."
+        info = self.company_info
+        if not any([info['emails'], info['phones'], info['india_address'], info['singapore_address']]):
+            return "No contact details found."
 
-        response = "📞 **COMPANY CONTACT INFORMATION**\n\n"
+        msg = "📞 **COMPANY CONTACT INFORMATION**\n\n"
+        if info['india_address']:
+            msg += f"🇮🇳 **India Office:**\n{info['india_address']}\n\n"
+        if info['singapore_address']:
+            msg += f"🇸🇬 **Singapore Office:**\n{info['singapore_address']}\n\n"
+        if info['emails']:
+            msg += "📧 **Emails:**\n" + "\n".join([f"• {e}" for e in info['emails']]) + "\n\n"
+        if info['phones']:
+            msg += "☎️ **Phones:**\n" + "\n".join([f"• {p}" for p in info['phones']]) + "\n"
 
-        if self.company_info['india_address'] or self.company_info['singapore_address']:
-            response += "🏢 **OFFICE ADDRESSES:**\n\n"
-            if self.company_info['india_address']:
-                response += f"📍 **India Office (Corporate Office):**\n   {self.company_info['india_address']}\n\n"
-            if self.company_info['singapore_address']:
-                response += f"📍 **Singapore Office:**\n   {self.company_info['singapore_address']}\n\n"
-
-        if self.company_info['emails']:
-            response += "📧 **EMAIL:**\n"
-            for email in sorted(self.company_info['emails']):
-                response += f"   • {email}\n"
-            response += "\n"
-
-        if self.company_info['phones']:
-            response += "☎️ **PHONE:**\n"
-            for phone in sorted(self.company_info['phones']):
-                response += f"   • {phone}\n"
-
-        return response.strip()
+        return msg.strip()
 
     def initialize(self, url, max_pages=40, progress_callback=None):
         try:
             content = self.scrape_website(url, max_pages, progress_callback)
-
             if len(content) < 1000:
                 return False
 
             splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1200,
-                chunk_overlap=200,
+                chunk_size=1200, chunk_overlap=200,
                 separators=["\n\n", "\n", ". ", " "]
             )
             chunks = splitter.split_text(content)
@@ -494,32 +266,29 @@ class SyngridAI:
             )
 
             vectorstore = Chroma.from_texts(
-                chunks,
-                embedding=embeddings,
-                persist_directory="./syngrid_chroma"
+                chunks, embedding=embeddings, persist_directory="./syngrid_chroma"
             )
-
-            self.retriever = vectorstore.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 5}
-            )
-
+            self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             self.status["ready"] = True
             return True
-
         except Exception as e:
-            st.error(f"Initialization Error: {str(e)}")
+            st.error(f"Initialization Error: {e}")
             return False
 
     def ask(self, question):
         if not self.status["ready"]:
-            return "⚠️ Please wait for initialization to complete."
+            return "⚠️ Initialization still in progress."
 
         q_lower = question.lower().strip()
-        contact_keywords = ['contact', 'email', 'phone', 'address', 'office', 'location',
-                          'reach', 'call', 'visit', 'headquarters', 'where']
 
-        if any(keyword in q_lower for keyword in contact_keywords):
+        # Greeting Override 
+        greetings = ["hi", "hello", "hey", "hai", "hii", "helloo"]
+        if q_lower in greetings:
+            return "Hi, I'm Syngrid AI Assistant. How can I assist you?"
+
+        # Contact info detection
+        contact_words = ["email", "contact", "phone", "address", "office", "location"]
+        if any(k in q_lower for k in contact_words):
             return self.get_company_contact_info()
 
         if q_lower in self.cache:
@@ -528,18 +297,20 @@ class SyngridAI:
         try:
             docs = self.retriever.invoke(question)
             if not docs:
-                return "I couldn't find relevant information. Could you rephrase?"
+                return "I couldn't find relevant information."
 
-            context = "\n\n".join([doc.page_content for doc in docs])
+            context = "\n\n".join([d.page_content for d in docs])[:4000]
 
-            prompt = f"""You are Syngrid AI Assistant. Answer based on the provided context about Syngrid Technologies.
+            prompt = f"""
+Answer the question using the context below.
 
 Context:
-{context[:4000]}
+{context}
 
 Question: {question}
 
-Provide a helpful, accurate answer in 2-4 sentences."""
+Answer in 2–4 sentences.
+"""
 
             headers = {
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -551,41 +322,32 @@ Provide a helpful, accurate answer in 2-4 sentences."""
             payload = {
                 "model": MODEL,
                 "messages": [
-                    {"role": "system", "content": "You are Syngrid AI Assistant. Answer questions about Syngrid Technologies based only on the given context. Be concise and helpful."},
+                    {"role": "system", "content": "You answer only using given context."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.3,
-                "max_tokens": 300
+                "temperature": 0.3
             }
 
-            response = requests.post(OPENROUTER_API_BASE, headers=headers, json=payload, timeout=60)
-
-            if response.status_code == 200:
-                result = response.json()
-                answer = result["choices"][0]["message"]["content"].strip()
-                if answer and len(answer) > 10:
-                    self.cache[q_lower] = answer
-                    return answer
-                else:
-                    return "I'm having trouble generating a response. Please try again."
-            else:
-                return f"⚠️ API Error (Status {response.status_code})"
+            r = requests.post(OPENROUTER_API_BASE, headers=headers, json=payload, timeout=60)
+            if r.status_code == 200:
+                ans = r.json()["choices"][0]["message"]["content"].strip()
+                self.cache[q_lower] = ans
+                return ans
+            return f"API Error: {r.status_code}"
 
         except Exception as e:
-            return f"⚠️ Error: {str(e)}"
+            return f"Error: {e}"
 
     def save_to_db(self, question, answer):
         try:
             db = SessionLocal()
-            chat_entry = ChatHistory(question=question, answer=answer, timestamp=datetime.now(timezone.utc))
-            db.add(chat_entry)
+            db.add(ChatHistory(question=question, answer=answer))
             db.commit()
             db.close()
-        except Exception as e:
+        except:
             pass
-
 # Initialize session state
-if 'ai' not in st.session_state:
+if "ai" not in st.session_state:
     st.session_state.ai = SyngridAI()
     st.session_state.initialized = False
     st.session_state.messages = []
@@ -601,96 +363,145 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# Auto-initialize on first load
+# ==============================
+# 🔥 SIDEBAR WITH DB DOWNLOAD
+# ==============================
+with st.sidebar:
+    st.markdown("### ⚙️ Assistant Status")
+
+    if st.session_state.initialized:
+        st.markdown('<div class="status-badge status-ready">✅ Ready</div>', unsafe_allow_html=True)
+        st.metric("Pages Scraped", st.session_state.ai.status["pages_scraped"])
+        st.metric("Messages", len(st.session_state.messages))
+    else:
+        st.markdown('<div class="status-badge status-loading pulse">Initializing…</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("### 🗂 Download Database File")
+
+    if os.path.exists("syngrid_chat.db"):
+        with open("syngrid_chat.db", "rb") as f:
+            st.download_button(
+                "⬇️ Download syngrid_chat.db",
+                data=f,
+                file_name="syngrid_chat.db",
+                mime="application/octet-stream",
+                use_container_width=True
+            )
+    else:
+        st.info("Database not created yet.")
+
+    st.markdown("---")
+    st.markdown("### Quick Tools")
+    if st.button("🗑️ Clear Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+
+
+# ==============================
+# 🔥 AUTO-INITIALIZE AI SCRAPER
+# ==============================
 if not st.session_state.initialized:
-    with st.spinner("🚀 Initializing Syngrid AI Assistant..."):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        def update_progress(current, total, url):
-            progress = current / total
-            progress_bar.progress(progress)
-            status_text.text(f"Scraping page {current}/{total}: {url[:50]}...")
-        
-        success = st.session_state.ai.initialize(SYNGRID_WEBSITE, max_pages=40, progress_callback=update_progress)
-        
-        if success:
+    with st.spinner("🚀 Initializing Syngrid AI Assistant…"):
+        bar = st.progress(0)
+        stat = st.empty()
+
+        def cb(cur, total, url):
+            bar.progress(cur / total)
+            stat.text(f"Scraping {cur}/{total}: {url}")
+
+        ok = st.session_state.ai.initialize(SYNGRID_WEBSITE, max_pages=40, progress_callback=cb)
+
+        if ok:
             st.session_state.initialized = True
-            progress_bar.progress(1.0)
-            status_text.text("✅ Initialization complete!")
+            bar.progress(1.0)
+            stat.text("Initialization complete!")
             time.sleep(1)
             st.rerun()
         else:
-            st.error("❌ Failed to initialize. Please refresh the page.")
+            st.error("❌ Initialization failed.")
             st.stop()
 
-# Chat Interface
+
+
+# ==============================
+# 🔥 CHAT INTERFACE
+# ==============================
 if st.session_state.initialized:
-    # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    
+
+    # Display chat history
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
     # Chat input
-    if prompt := st.chat_input("Ask me anything about Syngrid Technologies..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    if user_input := st.chat_input("Ask anything about Syngrid…"):
+
+        # Save user message
+        st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
-            st.markdown(prompt)
-        
+            st.markdown(user_input)
+
         st.session_state.question_count += 1
-        
-        # Show contact form after 3 questions
+
+        # Contact form trigger
         if st.session_state.question_count == 3 and not st.session_state.user_info_collected:
+
+            # AI response first
             with st.chat_message("assistant"):
-                response = st.session_state.ai.ask(prompt)
+                response = st.session_state.ai.ask(user_input)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
-                st.session_state.ai.save_to_db(prompt, response)
-            
+                st.session_state.ai.save_to_db(user_input, response)
+
             st.markdown("---")
             st.markdown('<div class="contact-form">', unsafe_allow_html=True)
-            st.markdown("### 📋 Please provide your contact information to continue")
-            
+            st.markdown("### 📋 Please enter your contact information")
+
             with st.form("contact_form"):
-                name = st.text_input("Full Name *", placeholder="John Doe")
-                email = st.text_input("Email Address *", placeholder="john@example.com")
-                phone = st.text_input("Phone Number *", placeholder="+91 98765 43210")
-                
-                submitted = st.form_submit_button("Submit & Continue", use_container_width=True)
-                
-                if submitted:
+                name = st.text_input("Full Name *")
+                email = st.text_input("Email *")
+                phone = st.text_input("Phone *")
+
+                submit = st.form_submit_button("Submit & Continue")
+
+                if submit:
                     if name and email and phone:
                         try:
                             db = SessionLocal()
-                            contact = UserContact(name=name, email=email, phone=phone, timestamp=datetime.now(timezone.utc))
-                            db.add(contact)
+                            db.add(UserContact(name=name, email=email, phone=phone))
                             db.commit()
                             db.close()
+
                             st.session_state.user_info_collected = True
-                            st.success("✅ Thank you! Informations are stored, you can continue chatting.")
-                            time.sleep(2)
+                            st.success("✅ Information saved! You can continue.")
+                            time.sleep(1.5)
                             st.rerun()
-                        except Exception as e:
-                            st.error("Failed to save contact info. Please try again.")
+                        except:
+                            st.error("Failed to save contact info.")
                     else:
                         st.error("Please fill all fields.")
-            
+
             st.markdown('</div>', unsafe_allow_html=True)
             st.stop()
-        
-        # Normal response
+
+        # Normal conversation response
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = st.session_state.ai.ask(prompt)
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                st.session_state.ai.save_to_db(prompt, response)
+            with st.spinner("Thinking…"):
+                answer = st.session_state.ai.ask(user_input)
+                st.markdown(answer)
+
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+                st.session_state.ai.save_to_db(user_input, answer)
+
+
 
 # Footer
 st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: rgba(255,255,255,0.7); padding: 2rem;'>
-    <p>🤖 Powered by Syngrid AI | Built with Streamlit & OpenRouter</p>
-    <p>© 2025 Syngrid Technologies. All rights reserved.</p>
+<div style='text-align: center; opacity: 0.7; padding: 20px;'>
+    🤖 Syngrid AI Assistant — Powered by Streamlit & OpenRouter  
+    <br>© 2025 Syngrid Technologies. All rights reserved.
 </div>
 """, unsafe_allow_html=True)
