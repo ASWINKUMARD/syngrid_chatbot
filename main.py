@@ -295,7 +295,7 @@ def get_company_contact_info(self):
 
         return msg.strip()
 
-    def initialize(self, url, max_pages=40, progress_callback=None):
+def initialize(self, url, max_pages=40, progress_callback=None):
         try:
             # Validate API key
             if not OPENROUTER_API_KEY:
@@ -359,7 +359,7 @@ def get_company_contact_info(self):
             st.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-    def ask(self, question):
+def ask(self, question):
         if not self.status["ready"]:
             return "⚠️ Initialization still in progress."
 
@@ -428,7 +428,7 @@ Answer in 2–4 sentences, focusing on the most relevant information."""
         except Exception as e:
             return f"⚠️ Error: {str(e)}"
 
-    def save_to_db(self, question, answer):
+def save_to_db(self, question, answer):
         db = None
         try:
             db = SessionLocal()
