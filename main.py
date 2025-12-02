@@ -184,7 +184,7 @@ class UserContact(Base):
 Base.metadata.create_all(bind=engine)
 
 # Configuration
-OPENROUTER_API_KEY = ""
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions"
 SYNGRID_WEBSITE = "https://syngrid.com/"
 MODEL = "kwaipilot/kat-coder-pro:free"
