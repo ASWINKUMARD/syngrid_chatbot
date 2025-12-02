@@ -481,7 +481,7 @@ Answer in 2–4 sentences, focusing on the most relevant information."""
         except Exception as e:
             return f"⚠️ Error: {str(e)}"
 
-    def save_to_db(self, question, answer):
+def save_to_db(self, question, answer):
         db = None
         try:
             db = SessionLocal()
