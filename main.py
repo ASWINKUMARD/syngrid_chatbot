@@ -295,7 +295,7 @@ def get_company_contact_info(self):
 
         return msg.strip()
 
-    def initialize(self, url, max_pages=40, progress_callback=None):
+def initialize(self, url, max_pages=40, progress_callback=None):
         try:
             # Validate API key
             if not OPENROUTER_API_KEY:
