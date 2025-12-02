@@ -1,380 +1,113 @@
-import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+# app.py
+"""
+Syngrid AI Assistant - Streamlit RAG Chatbot (Production-ready)
+Features:
+- Scrapes up to 50 pages from syngrid.com (priority pages first)
+- Builds FAISS vector store with BGE-small embeddings (BAAI/bge-small-en-v1.5)
+- Robust embedding loader with local hf cache (./hf_cache)
+- OpenRouter integration for completions (set OPENROUTER_API_KEY in env / Streamlit secrets)
+- Gorgeous Streamlit UI (preserves user's visual design; fixes input color)
+- Flexible phone validation (8-20 digits)
+- Safe DB storage (SQLite in project folder)
+- Resilient error handling for model / cache corruption
+NOTE: Do NOT commit secrets (OPENROUTER_API_KEY) to repo.
+"""
+
+import os
+import re
+import json
+import time
+import shutil
+import hashlib
 from collections import deque
 from datetime import datetime, timezone
+from typing import List
+
+import requests
+import streamlit as st
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
-import time
-import os
-import hashlib
-import re
-from typing import List
-from langchain.embeddings.base import Embeddings
 
-# ========================================
-# PAGE CONFIG
-# ========================================
-st.set_page_config(
-    page_title="Syngrid AI Assistant",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+# langchain helpers
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+
+# Try to import HuggingFace wrapper; fallback to sentence-transformers direct
+try:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+except Exception:
+    HuggingFaceEmbeddings = None
+
+# For sentence-transformers fallback
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception:
+    SentenceTransformer = None
+
+# ---------------------------
+# CONFIG
+# ---------------------------
+st.set_page_config(page_title="Syngrid AI Assistant", page_icon="⚡", layout="wide")
+
+BASE_URL = "https://syngrid.com/"
+DB_FILE = "syngrid_chat.db"
+HF_CACHE_DIR = os.path.abspath("./hf_cache")
+FAISS_DIR = os.path.abspath("./faiss_index")
+os.makedirs(HF_CACHE_DIR, exist_ok=True)
+
+# Use env var or Streamlit secrets for OpenRouter key
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions"
+# Model used for generation (user previously used kwaipilot/kat-coder-pro:free)
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "kwaipilot/kat-coder-pro:free")
+
+# Embedding model choice (B2)
+EMBED_MODEL_ID = "BAAI/bge-small-en-v1.5"  # BGE-small (recommended by user)
+
+# Set HF cache envs for local project cache (helps on Windows/Streamlit Cloud)
+os.environ.update({
+    "HF_HOME": HF_CACHE_DIR,
+    "TRANSFORMERS_CACHE": HF_CACHE_DIR,
+    "SENTENCE_TRANSFORMERS_HOME": HF_CACHE_DIR,
+    "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
+    "TOKENIZERS_PARALLELISM": "false",
+})
+
+# ---------------------------
+# CSS / UI (preserve visuals, fix input text color)
+# ---------------------------
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700;800&display=swap');
+    * { font-family: 'Poppins', sans-serif; }
+    .stApp { background: linear-gradient(135deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%); background-size: 400% 400%; animation: gradientWave 20s ease infinite; }
+    @keyframes gradientWave { 0% {background-position:0% 50%} 50% {background-position:100% 50%} 100% {background-position:0% 50%} }
+    .syngrid-header { background: linear-gradient(135deg, rgba(102,126,234,0.95), rgba(118,75,162,0.95)); padding: 3rem; border-radius: 30px; text-align:center; margin-bottom:2.5rem; box-shadow:0 25px 70px rgba(102,126,234,0.5); border:2px solid rgba(255,255,255,0.2); }
+    .syngrid-logo { font-size: 3.6rem; font-weight:800; background: linear-gradient(135deg,#fff,#a8edea); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:0.5rem; }
+    .syngrid-tagline { color:#e0f2fe; font-size:1.15rem; font-weight:300; }
+    .user-message { background: linear-gradient(135deg,#667eea,#764ba2); padding:1.2rem 1.6rem; border-radius:18px 18px 8px 18px; margin:1rem 0; color:white; font-size:1rem; line-height:1.5; }
+    .bot-message { background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(240,248,255,0.98)); padding:1.2rem 1.6rem; border-radius:18px 18px 18px 8px; margin:1rem 0; color:#0b1221; font-size:1rem; line-height:1.6; border-left:6px solid #667eea; }
+    .stButton>button { background: linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%); color:white; border-radius:50px; padding:0.9rem 2rem; font-weight:700; box-shadow:0 12px 35px rgba(102,126,234,0.6); }
+    .stTextInput>div>div>input { border-radius: 28px; border: 2px solid rgba(102,126,234,0.5); padding:0.9rem 1.4rem; background: rgba(255,255,255,0.95) !important; color: #000 !important; }
+    .stTextInput>div>div>input::placeholder { color:#6b7280 !important; }
+    textarea, input, select { color: #000 !important; }
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# ========================================
-# STUNNING CUSTOM CSS
-# ========================================
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700;800&display=swap');
-    
-    * {
-        font-family: 'Poppins', sans-serif;
-    }
-    
-    .stApp {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%);
-        background-size: 400% 400%;
-        animation: gradientWave 20s ease infinite;
-    }
-    
-    @keyframes gradientWave {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    
-    .syngrid-header {
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.95) 0%, rgba(118, 75, 162, 0.95) 100%);
-        backdrop-filter: blur(20px);
-        padding: 3rem;
-        border-radius: 30px;
-        text-align: center;
-        margin-bottom: 2.5rem;
-        box-shadow: 0 25px 70px rgba(102, 126, 234, 0.5), 0 0 120px rgba(118, 75, 162, 0.3);
-        border: 2px solid rgba(255, 255, 255, 0.2);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .syngrid-header::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.05), transparent);
-        animation: headerShine 4s infinite;
-    }
-    
-    @keyframes headerShine {
-        0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
-        100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
-    }
-    
-    .syngrid-logo {
-        font-size: 4rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #fff 0%, #a8edea 50%, #fed6e3 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        margin-bottom: 0.5rem;
-        letter-spacing: -2px;
-        position: relative;
-        z-index: 1;
-        filter: drop-shadow(0 0 30px rgba(255, 255, 255, 0.5));
-    }
-    
-    .syngrid-tagline {
-        color: #e0f2fe;
-        font-size: 1.4rem;
-        font-weight: 300;
-        letter-spacing: 1px;
-        position: relative;
-        z-index: 1;
-    }
-    
-    .user-message {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.8rem 2.2rem;
-        border-radius: 30px 30px 8px 30px;
-        margin: 1.8rem 0;
-        color: white;
-        box-shadow: 0 10px 40px rgba(102, 126, 234, 0.5);
-        font-size: 1.15rem;
-        animation: slideInRight 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-        border: 2px solid rgba(255, 255, 255, 0.15);
-        position: relative;
-        overflow: hidden;
-        line-height: 1.6;
-    }
-    
-    .user-message::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
-        transition: left 0.6s;
-    }
-    
-    .user-message:hover::before {
-        left: 100%;
-    }
-    
-    .bot-message {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(240, 248, 255, 0.98) 100%);
-        padding: 1.8rem 2.2rem;
-        border-radius: 30px 30px 30px 8px;
-        margin: 1.8rem 0;
-        color: #1e293b;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-        border-left: 6px solid #667eea;
-        font-size: 1.15rem;
-        animation: slideInLeft 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-        line-height: 1.8;
-    }
-    
-    @keyframes slideInRight {
-        from { opacity: 0; transform: translateX(60px) scale(0.85); }
-        to { opacity: 1; transform: translateX(0) scale(1); }
-    }
-    
-    @keyframes slideInLeft {
-        from { opacity: 0; transform: translateX(-60px) scale(0.85); }
-        to { opacity: 1; transform: translateX(0) scale(1); }
-    }
-    
-    .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-        color: white;
-        border: none;
-        border-radius: 50px;
-        padding: 1rem 3rem;
-        font-weight: 700;
-        font-size: 1.15rem;
-        box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
-        transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-        border: 2px solid rgba(255, 255, 255, 0.25);
-        letter-spacing: 1px;
-        text-transform: uppercase;
-    }
-    
-    .stButton>button:hover {
-        transform: translateY(-6px) scale(1.08);
-        box-shadow: 0 18px 50px rgba(102, 126, 234, 0.8);
-        background: linear-gradient(135deg, #764ba2 0%, #667eea 50%, #f093fb 100%);
-    }
-    
-    .stButton>button:active {
-        transform: translateY(-3px) scale(1.03);
-    }
-    
-    .stTextInput>div>div>input {
-        border-radius: 50px;
-        border: 3px solid rgba(102, 126, 234, 0.5);
-        padding: 1.3rem 2.2rem;
-        background: rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(15px);
-        font-size: 1.15rem;
-        color: #f0f9ff;
-        transition: all 0.3s ease;
-    }
-    
-    .stTextInput>div>div>input:focus {
-        border-color: #a8edea;
-        box-shadow: 0 0 40px rgba(168, 237, 234, 0.5);
-        background: rgba(255, 255, 255, 0.12);
-    }
-    
-    .stTextInput>div>div>input::placeholder {
-        color: #cbd5e1;
-    }
-    
-    [data-testid="stMetricValue"] {
-        font-size: 2.2rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #fff 0%, #a8edea 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    
-    [data-testid="stMetricLabel"] {
-        color: #e0f2fe !important;
-        font-weight: 600;
-        font-size: 1rem;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-    }
-    
-    .stMetric {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 100%);
-        padding: 1.8rem;
-        border-radius: 25px;
-        border: 2px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-        transition: transform 0.3s ease;
-        backdrop-filter: blur(10px);
-    }
-    
-    .stMetric:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 15px 50px rgba(255, 255, 255, 0.3);
-    }
-    
-    h1, h2, h3 { 
-        background: linear-gradient(135deg, #fff 0%, #a8edea 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800;
-    }
-    
-    p, label { 
-        color: #f0f9ff !important;
-        line-height: 1.7;
-    }
-    
-    .welcome-container {
-        text-align: center;
-        padding: 5rem 3rem;
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-        border-radius: 30px;
-        border: 2px solid rgba(255, 255, 255, 0.25);
-        margin: 2rem 0;
-        backdrop-filter: blur(15px);
-    }
-    
-    .welcome-container h3 {
-        font-size: 2.5rem;
-        margin-bottom: 1.5rem;
-    }
-    
-    .welcome-container p {
-        font-size: 1.3rem;
-        color: #e0f2fe !important;
-        line-height: 1.8;
-    }
-    
-    .modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.7);
-        backdrop-filter: blur(10px);
-        z-index: 9999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        animation: fadeIn 0.3s ease;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-    
-    .modal-content {
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.98) 0%, rgba(118, 75, 162, 0.98) 100%);
-        padding: 3rem;
-        border-radius: 30px;
-        max-width: 600px;
-        width: 90%;
-        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5);
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        animation: slideUp 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    }
-    
-    @keyframes slideUp {
-        from { transform: translateY(100px) scale(0.9); opacity: 0; }
-        to { transform: translateY(0) scale(1); opacity: 1; }
-    }
-    
-    .modal-content h2 {
-        color: white !important;
-        background: none !important;
-        -webkit-text-fill-color: white !important;
-        margin-bottom: 1.5rem;
-        text-align: center;
-    }
-    
-    .modal-content p {
-        color: #e0f2fe !important;
-        text-align: center;
-        margin-bottom: 2rem;
-        font-size: 1.1rem;
-    }
-    
-    .init-section {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 100%);
-        padding: 3.5rem;
-        border-radius: 30px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        margin: 2rem 0;
-        backdrop-filter: blur(15px);
-    }
-    
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stStatusWidget"] {visibility: hidden;}
-    
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-        border-radius: 10px;
-        height: 8px;
-    }
-    
-    .stSpinner > div {
-        border-top-color: #a8edea !important;
-    }
-    
-    ::-webkit-scrollbar { width: 16px; }
-    ::-webkit-scrollbar-track { 
-        background: rgba(0, 0, 0, 0.3);
-        border-radius: 10px;
-    }
-    ::-webkit-scrollbar-thumb { 
-        background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
-        border-radius: 10px;
-        border: 3px solid rgba(0, 0, 0, 0.3);
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(180deg, #764ba2 0%, #f093fb 100%);
-    }
-    
-    hr {
-        border: none;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
-        margin: 2.5rem 0;
-    }
-    
-    .stAlert {
-        background: rgba(255, 255, 255, 0.1) !important;
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        border: 2px solid rgba(255, 255, 255, 0.2);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ========================================
-# DATABASE SETUP
-# ========================================
-USE_MEMORY_DB = os.environ.get("USE_MEMORY_DB", "true").lower() == "true"
-DATABASE_URL = "sqlite:///:memory:" if USE_MEMORY_DB else "sqlite:///./syngrid_chat.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# ---------------------------
+# DATABASE (SQLAlchemy)
+# ---------------------------
 Base = declarative_base()
+engine = create_engine(f"sqlite:///{DB_FILE}", connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class ChatHistory(Base):
     __tablename__ = "chat_history"
@@ -388,386 +121,390 @@ class UserContact(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False)
-    phone = Column(String(30), nullable=False)
+    phone = Column(String(50), nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 Base.metadata.create_all(bind=engine)
 
-# ========================================
-# VALIDATION FUNCTIONS
-# ========================================
-def validate_email(email):
-    """Validate email format"""
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email) is not None
+# ---------------------------
+# Validation utilities
+# ---------------------------
+def validate_email(email: str) -> bool:
+    pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}$'
+    return bool(re.match(pattern, (email or "").strip()))
 
-def validate_phone(phone):
-    """Validate phone number (8-15 digits, flexible for international)"""
-    cleaned = re.sub(r'[\s\-\(\)\+]', '', phone)
-    return 8 <= len(cleaned) <= 15 and cleaned.replace('+', '').isdigit()
+def validate_phone_flexible(phone: str) -> bool:
+    cleaned = re.sub(r'\D', '', phone or "")
+    return 7 <= len(cleaned) <= 20
 
-def validate_name(name):
-    """Validate name (at least 2 characters)"""
-    return len(name.strip()) >= 2 and re.match(r'^[a-zA-Z\s]+$', name.strip()) is not None
+def validate_name(name: str) -> bool:
+    return bool(name and len(name.strip()) >= 2)
 
-# ========================================
-# CONFIGURATION
-# ========================================
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-SYNGRID_WEBSITE = "https://syngrid.com/"
+# ---------------------------
+# Embeddings loader (BGE-small, robust)
+# ---------------------------
+def make_embedding_client():
+    """
+    Preferred: LangChain HuggingFace wrapper -> fallback to sentence-transformers directly.
+    Uses local cache folder (HF_CACHE_DIR).
+    """
+    # Try LangChain wrapper (if available & compatible)
+    if HuggingFaceEmbeddings is not None:
+        try:
+            emb = HuggingFaceEmbeddings(
+                model_name=EMBED_MODEL_ID,
+                cache_folder=HF_CACHE_DIR,
+                model_kwargs={"device": "cpu"},
+            )
+            st.info("Embeddings: loaded via LangChain HuggingFace wrapper.")
+            return emb
+        except Exception as e:
+            st.warning(f"LangChain HuggingFaceEmbeddings failed: {e}. Falling back...")
 
+    # Fallback to sentence-transformers
+    if SentenceTransformer is not None:
+        try:
+            st.info(f"Loading sentence-transformers model: {EMBED_MODEL_ID} (this may take 20-60s first run)")
+            model = SentenceTransformer(EMBED_MODEL_ID, cache_folder=HF_CACHE_DIR)
+            st.info("Embeddings: loaded via sentence-transformers.")
+            class STWrapper:
+                def embed_documents(self, texts: List[str]):
+                    return [model.encode(t, show_progress_bar=False, convert_to_numpy=True) for t in texts]
+                def embed_query(self, text: str):
+                    return model.encode(text, show_progress_bar=False, convert_to_numpy=True)
+            return STWrapper()
+        except Exception as e:
+            st.error(f"Failed to load sentence-transformers model: {e}")
+            raise
+    else:
+        raise RuntimeError("No embeddings backend available. Install 'sentence-transformers' or 'langchain-community'.")
+
+# initialize embeddings (cached in session_state)
+if 'embeddings' not in st.session_state:
+    try:
+        st.session_state['embeddings'] = make_embedding_client()
+    except Exception as e:
+        st.session_state['embeddings'] = None
+        st.error("Embeddings initialization failed. Check logs and ensure network access. " + str(e))
+
+# ---------------------------
+# Vector store helpers (FAISS)
+# ---------------------------
+def load_faiss_store():
+    emb = st.session_state.get('embeddings')
+    if emb is None:
+        return None
+    if os.path.exists(FAISS_DIR):
+        try:
+            store = FAISS.load_local(FAISS_DIR, emb)
+            return store
+        except Exception as e:
+            st.warning(f"Failed to load FAISS index (corrupted?). Removing and allowing rebuild. Error: {e}")
+            try:
+                shutil.rmtree(FAISS_DIR)
+            except Exception:
+                pass
+            return None
+    return None
+
+def save_faiss_store(store):
+    os.makedirs(FAISS_DIR, exist_ok=True)
+    store.save_local(FAISS_DIR)
+
+# ---------------------------
+# Scraper / Content extraction
+# ---------------------------
 PRIORITY_PAGES = [
     "", "about", "about-us", "services", "solutions", "products",
-    "contact", "contact-us", "team", "careers", "footer", "reach-us"
+    "contact", "contact-us", "team", "careers", "portfolio", "case-studies",
+    "industries", "technology", "expertise", "what-we-do", "who-we-are",
+    "footer", "locations", "reach-us", "blog", "clients", "partners"
 ]
 
-# ========================================
-# SIMPLE EMBEDDINGS CLASS
-# ========================================
-class SimpleEmbeddings(Embeddings):
-    """Hash-based embeddings - no external models needed"""
-    
-    def __init__(self):
-        self.dimension = 384
-        
-    def _tokenize(self, text: str) -> List[str]:
-        words = text.lower().split()
-        words = [''.join(c for c in word if c.isalnum()) for word in words]
-        return [w for w in words if len(w) > 2]
-    
-    def _get_vector(self, text: str) -> List[float]:
-        tokens = self._tokenize(text)
-        vector = [0.0] * self.dimension
-        
-        for i, token in enumerate(tokens[:25]):
-            hash_val = int(hashlib.md5(token.encode()).hexdigest(), 16)
-            positions = [(hash_val + j) % self.dimension for j in range(15)]
-            
-            for pos in positions:
-                vector[pos] += 1.0 / (i + 1)
-        
-        norm = sum(v * v for v in vector) ** 0.5
-        if norm > 0:
-            vector = [v / norm for v in vector]
-        
-        return vector
-    
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return [self._get_vector(text) for text in texts]
-    
-    def embed_query(self, text: str) -> List[float]:
-        return self._get_vector(text)
+def is_valid_url_for_scrape(url: str, base_domain: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.netloc != base_domain:
+            return False
+    except Exception:
+        return False
+    skip = [r'\.pdf$', r'\.jpg$', r'\.png$', r'\.gif$', r'\.zip$', r'/wp-admin/', r'/wp-content/(?!.*contact)', r'/feed/', r'/rss/', r'/sitemap', r'/login', r'/register', r'\.css$', r'\.js$']
+    for p in skip:
+        if re.search(p, url.lower()):
+            return False
+    return True
 
-# ========================================
-# RAG SERVICE CLASS
-# ========================================
+def extract_text_soup(soup: BeautifulSoup) -> str:
+    for tag in soup(['script', 'style', 'nav', 'aside', 'iframe', 'form', 'button']):
+        tag.decompose()
+    text = soup.get_text(separator='\n', strip=True)
+    lines = [ln.strip() for ln in text.split('\n') if ln.strip() and len(ln.strip()) > 20]
+    return "\n".join(lines)
+
+# Improved contact extraction (emails, phones, addresses)
+def extract_contact_info_from_text(text: str):
+    emails = set(re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', text))
+    phones = set()
+    for patt in [r'\+\d{1,3}[\s\-]?\d{4,5}[\s\-]?\d{4,5}', r'\(?\d{2,5}\)?[\s\-]?\d{3,5}[\s\-]?\d{3,5}']:
+        for m in re.findall(patt, text):
+            cleaned = re.sub(r'[^\d\+]', '', m)
+            if 7 <= len(re.sub(r'\D', '', cleaned)) <= 20:
+                phones.add(m.strip())
+    return emails, phones
+
+def crawl_website_collect(base_url: str, max_pages: int = 50, progress_callback=None):
+    base_domain = urlparse(base_url).netloc
+    visited = set()
+    queue = deque()
+    for p in PRIORITY_PAGES:
+        queue.append(urljoin(base_url, p))
+    if base_url not in queue:
+        queue.append(base_url)
+    headers = {"User-Agent": "Mozilla/5.0 (SyngridBot/1.0)"}
+    collected = []
+    found_emails = set()
+    found_phones = set()
+    india_address = None
+    singapore_address = None
+
+    while queue and len(visited) < max_pages:
+        url = queue.popleft().split('#')[0].split('?')[0]
+        if url in visited:
+            continue
+        if not is_valid_url_for_scrape(url, base_domain):
+            continue
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                continue
+            visited.add(url)
+            if progress_callback:
+                progress_callback(len(visited), max_pages)
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            text = extract_text_soup(soup)
+            if not text or len(text) < 120:
+                # still queue child links but skip saving
+                for a in soup.find_all('a', href=True):
+                    nxt = urljoin(url, a['href']).split('#')[0].split('?')[0]
+                    if nxt not in visited and nxt not in queue and is_valid_url_for_scrape(nxt, base_domain):
+                        queue.append(nxt)
+                continue
+            # contact extraction
+            emails, phones = extract_contact_info_from_text(text)
+            found_emails.update(emails)
+            found_phones.update(phones)
+            # attempt to find addresses in contact/footer pages
+            if any(k in url.lower() for k in ['contact', 'footer', 'reach', 'about']):
+                lines = text.split('\n')
+                # detect India addresses (simple heuristics)
+                for i, line in enumerate(lines):
+                    if 'madurai' in line.lower() or 'india' in line.lower():
+                        snippet = " ".join(lines[max(0, i-3): min(len(lines), i+4)])
+                        if len(snippet) > 40 and not india_address:
+                            india_address = snippet.strip()
+                    if 'singapore' in line.lower() and re.search(r'\d{6}', line):
+                        snippet = " ".join(lines[max(0, i-3): min(len(lines), i+4)])
+                        if len(snippet) > 40 and not singapore_address:
+                            singapore_address = snippet.strip()
+            title = soup.title.string.strip() if soup.title and soup.title.string else url
+            collected.append(f"URL: {url}\nTITLE: {title}\n\n{text}")
+            # queue links
+            for a in soup.find_all('a', href=True):
+                nxt = urljoin(url, a['href']).split('#')[0].split('?')[0]
+                if nxt not in visited and nxt not in queue and is_valid_url_for_scrape(nxt, base_domain):
+                    queue.append(nxt)
+        except Exception:
+            continue
+
+    separator = "\n\n=== PAGE BREAK ===\n\n"
+    full_text = separator.join(collected)
+    # prepend formatted contact info
+    contact_block = ""
+    if india_address:
+        contact_block += f"INDIA OFFICE:\n{india_address}\n\n"
+    if singapore_address:
+        contact_block += f"SINGAPORE OFFICE:\n{singapore_address}\n\n"
+    if found_emails:
+        contact_block += "EMAILS:\n" + "\n".join(sorted(found_emails)) + "\n\n"
+    if found_phones:
+        contact_block += "PHONES:\n" + "\n".join(sorted(found_phones)) + "\n\n"
+    if contact_block:
+        full_text = contact_block + separator + full_text
+    return full_text, len(visited)
+
+# ---------------------------
+# Knowledge base build
+# ---------------------------
+def build_knowledge_base(max_pages: int = 50, progress_callback=None):
+    st.info("Starting crawl and embeddings (this may take a minute on first run)...")
+    content, pages = crawl_website_collect(BASE_URL, max_pages=max_pages, progress_callback=progress_callback)
+    if not content or len(content) < 400:
+        st.error("Crawl returned insufficient content. Check target site or try again.")
+        return None, pages
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = splitter.split_text(content)
+    emb = st.session_state.get('embeddings')
+    if emb is None:
+        st.error("Embeddings not available. Cannot build index.")
+        return None, pages
+    store = FAISS.from_texts(chunks, emb)
+    save_faiss_store(store)
+    return store, pages
+
+# ---------------------------
+# OpenRouter helper (robust)
+# ---------------------------
+def ask_openrouter(prompt: str, context: str = "") -> str:
+    if not OPENROUTER_API_KEY:
+        return "⚠️ OPENROUTER_API_KEY not configured. Set it in environment or Streamlit secrets."
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are Syngrid AI Assistant. Answer concisely and accurately using only the provided context when available."},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{prompt}"}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 450
+    }
+    try:
+        res = requests.post(OPENROUTER_API_BASE, headers=headers, json=payload, timeout=30)
+    except Exception as e:
+        return f"⚠️ Network error contacting OpenRouter: {str(e)}"
+
+    # Try parse JSON
+    try:
+        data = res.json()
+    except Exception:
+        return f"⚠️ OpenRouter returned non-JSON response (status {res.status_code})."
+
+    if res.status_code != 200:
+        # attempt to extract message
+        err = data.get("error", {}) if isinstance(data, dict) else {}
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        return f"⚠️ OpenRouter Error {res.status_code}: {msg or res.text[:200]}"
+
+    choices = data.get("choices") or []
+    if not choices:
+        return "⚠️ OpenRouter returned empty choices. Please try again."
+
+    # prefer field message.content
+    answer = choices[0].get("message", {}).get("content", "")
+    if not answer:
+        # fallback to other shapes
+        answer = str(choices[0])
+    answer = answer.strip()
+    if not answer:
+        return "⚠️ Model produced empty output. Try rephrasing."
+
+    return answer
+
+# ---------------------------
+# RAG Assistant class
+# ---------------------------
 class SyngridAI:
     def __init__(self):
+        self.vectorstore = None
         self.retriever = None
         self.cache = {}
         self.status = {"ready": False, "message": "Not initialized", "pages_scraped": 0}
-        self.vectorstore = None
-        self.company_info = {
-            'emails': set(),
-            'phones': set(),
-            'india_address': None,
-            'singapore_address': None,
-        }
 
-    def extract_contact_info(self, soup, text, url):
-        """Extract emails, phones, and addresses"""
-        # Extract emails
-        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-        emails = re.findall(email_pattern, text)
-        for email in emails:
-            if not email.lower().endswith(('.png', '.jpg', '.gif')):
-                self.company_info['emails'].add(email.lower())
-
-        # Extract phones (flexible international format)
-        phone_patterns = [
-            r'\+\d{1,3}[\s\-]?\d{4,5}[\s\-]?\d{4,5}',
-            r'\(?\d{3,5}\)?[\s\-]?\d{3,5}[\s\-]?\d{4}',
-        ]
-        for pattern in phone_patterns:
-            phones = re.findall(pattern, text)
-            for phone in phones:
-                cleaned = re.sub(r'[^\d+]', '', phone)
-                if 8 <= len(cleaned) <= 15:
-                    self.company_info['phones'].add(phone.strip())
-
-        # Extract addresses from contact/footer pages
-        if any(kw in url.lower() for kw in ['contact', 'footer', 'about', 'reach']):
-            lines = text.split('\n')
-            
-            # India address
-            if not self.company_info['india_address']:
-                for i, line in enumerate(lines):
-                    if ('madurai' in line.lower() or 'tbi' in line.lower()) and '625' in line:
-                        start = max(0, i - 2)
-                        end = min(len(lines), i + 5)
-                        address_parts = [lines[j].strip() for j in range(start, end) 
-                                       if lines[j].strip() and len(lines[j].strip()) > 5]
-                        if address_parts:
-                            full_address = ' '.join(address_parts)
-                            if 'madurai' in full_address.lower() and 30 < len(full_address) < 300:
-                                self.company_info['india_address'] = full_address
-                                break
-            
-            # Singapore address
-            if not self.company_info['singapore_address']:
-                for i, line in enumerate(lines):
-                    if 'singapore' in line.lower() and re.search(r'\d{6}', line):
-                        start = max(0, i - 2)
-                        end = min(len(lines), i + 5)
-                        address_parts = [lines[j].strip() for j in range(start, end) 
-                                       if lines[j].strip() and len(lines[j].strip()) > 5]
-                        if address_parts:
-                            full_address = ' '.join(address_parts)
-                            if 'singapore' in full_address.lower() and 30 < len(full_address) < 300:
-                                self.company_info['singapore_address'] = full_address
-                                break
-
-    def scrape_website(self, base_url, max_pages=25, progress_callback=None):
-        """Scrape website with enhanced content extraction"""
-        visited = set()
-        all_content = []
-        queue = deque()
-        base_domain = urlparse(base_url).netloc
-
-        # Add priority pages
-        for page in PRIORITY_PAGES:
-            queue.append(urljoin(base_url, page))
-
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-        while queue and len(visited) < max_pages:
-            current_url = queue.popleft()
-            current_url = current_url.split('#')[0].split('?')[0]
-
-            if current_url in visited or len(visited) >= max_pages:
-                continue
-
+    def load_index_if_exists(self):
+        store = load_faiss_store()
+        if store:
+            self.vectorstore = store
+            # as_retriever uses default similarity search
             try:
-                resp = requests.get(current_url, headers=headers, timeout=15, allow_redirects=True)
-                if resp.status_code != 200:
-                    continue
-
-                visited.add(current_url)
-                
-                if progress_callback:
-                    progress_callback(len(visited), max_pages)
-
-                soup = BeautifulSoup(resp.text, 'html.parser')
-                
-                # Remove unwanted elements
-                for tag in soup(['script', 'style', 'nav', 'aside', 'iframe']):
-                    tag.decompose()
-
-                text = soup.get_text(separator='\n', strip=True)
-                self.extract_contact_info(soup, text, current_url)
-
-                lines = [l.strip() for l in text.split('\n') if l.strip() and len(l.strip()) > 20]
-                clean_text = '\n'.join(lines)
-
-                if len(clean_text) > 200:
-                    all_content.append(f"SOURCE: {current_url}\n\n{clean_text}")
-
-                # Find more links
-                if len(visited) < max_pages:
-                    for link in soup.find_all('a', href=True):
-                        next_url = urljoin(current_url, link['href'])
-                        next_url = next_url.split('#')[0].split('?')[0]
-                        if (urlparse(next_url).netloc == base_domain and 
-                            next_url not in visited and next_url not in queue):
-                            queue.append(next_url)
-
+                self.retriever = self.vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
             except Exception:
-                continue
-
-        self.status["pages_scraped"] = len(visited)
-
-        # Add contact info to content
-        contact_info = self.format_company_info()
-        if contact_info:
-            all_content.insert(0, contact_info)
-
-        return "\n\n=== PAGE BREAK ===\n\n".join(all_content)
-
-    def format_company_info(self):
-        """Format contact information"""
-        if not any([self.company_info['emails'], self.company_info['phones'],
-                   self.company_info['india_address'], self.company_info['singapore_address']]):
-            return ""
-
-        info = "COMPANY CONTACT INFORMATION\n" + "="*50 + "\n\n"
-        
-        if self.company_info['india_address']:
-            info += f"INDIA OFFICE:\n{self.company_info['india_address']}\n\n"
-        
-        if self.company_info['singapore_address']:
-            info += f"SINGAPORE OFFICE:\n{self.company_info['singapore_address']}\n\n"
-        
-        if self.company_info['emails']:
-            info += "EMAILS:\n" + "\n".join(f"  • {e}" for e in sorted(self.company_info['emails'])) + "\n\n"
-        
-        if self.company_info['phones']:
-            info += "PHONES:\n" + "\n".join(f"  • {p}" for p in sorted(self.company_info['phones']))
-        
-        return info
-
-    def get_contact_info(self):
-        """Return formatted contact information"""
-        if not any([self.company_info['emails'], self.company_info['phones'],
-                   self.company_info['india_address'], self.company_info['singapore_address']]):
-            return "📞 Contact information not available. Please visit the website."
-
-        response = "📞 SYNGRID CONTACT INFORMATION\n" + "="*50 + "\n\n"
-        
-        if self.company_info['india_address'] or self.company_info['singapore_address']:
-            response += "🏢 OFFICES:\n\n"
-            if self.company_info['india_address']:
-                response += f"📍 India Office:\n   {self.company_info['india_address']}\n\n"
-            if self.company_info['singapore_address']:
-                response += f"📍 Singapore Office:\n   {self.company_info['singapore_address']}\n\n"
-        
-        if self.company_info['emails']:
-            response += "📧 EMAIL:\n" + "\n".join(f"   • {e}" for e in sorted(self.company_info['emails'])) + "\n\n"
-        
-        if self.company_info['phones']:
-            response += "☎️ PHONE:\n" + "\n".join(f"   • {p}" for p in sorted(self.company_info['phones']))
-        
-        return response.strip()
-
-    def initialize(self, url, max_pages, progress_callback=None):
-        """Initialize AI Assistant"""
-        try:
-            if not OPENROUTER_API_KEY:
-                self.status["message"] = "API key not configured"
-                return False
-            
-            self.status["message"] = "🔍 Analyzing website..."
-            content = self.scrape_website(url, max_pages, progress_callback)
-
-            if len(content) < 500:
-                self.status["message"] = "❌ Insufficient content"
-                return False
-
-            self.status["message"] = "📝 Processing content..."
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1200,
-                chunk_overlap=150,
-                separators=["\n\n=== PAGE BREAK ===\n\n", "\n\n", "\n", " "]
-            )
-            chunks = splitter.split_text(content)
-
-            self.status["message"] = "🧠 Building knowledge base..."
-            embeddings = SimpleEmbeddings()
-            self.vectorstore = Chroma.from_texts(chunks, embedding=embeddings)
-            self.retriever = self.vectorstore.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 5}
-            )
-
+                # if as_retriever not present, fallback to direct usage
+                self.retriever = None
             self.status["ready"] = True
-            self.status["message"] = "✅ Ready!"
+            self.status["message"] = "Index loaded"
             return True
+        return False
 
+    def initialize(self, url: str, max_pages: int = 50, progress_callback=None) -> bool:
+        # build index
+        try:
+            self.status["message"] = "Crawling site..."
+            store, pages = build_knowledge_base(max_pages=max_pages, progress_callback=progress_callback)
+            if store is None:
+                self.status["message"] = "Failed to build knowledge base"
+                return False
+            self.vectorstore = store
+            self.retriever = self.vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+            self.status["ready"] = True
+            self.status["message"] = "Ready"
+            self.status["pages_scraped"] = pages
+            return True
         except Exception as e:
-            self.status["message"] = f"❌ Error: {str(e)}"
+            self.status["message"] = f"Initialization error: {str(e)}"
             return False
 
-    def ask(self, question):
-        """Ask question to AI"""
+    def ask(self, question: str) -> str:
         if not self.status["ready"]:
-            return "⚡ Please initialize the assistant first."
+            return "⚡ Assistant not initialized. Please initialize first."
 
-        if not OPENROUTER_API_KEY:
-            return "⚠️ API key not configured."
+        q_lower = (question or "").lower().strip()
+        contact_kw = ['contact', 'email', 'phone', 'address', 'office', 'location', 'reach', 'call', 'visit', 'where']
+        if any(k in q_lower for k in contact_kw):
+            # try to return contact info from index (if present) - simple approach
+            # attempt to search for 'contact' content
+            try:
+                docs = self.vectorstore.similarity_search("contact information", k=3)
+                ctx = "\n\n".join([getattr(d, "page_content", str(d)) for d in docs])
+                if ctx:
+                    return ctx[:2000]
+            except Exception:
+                pass
+            return "📞 Contact info not found in index. Please check the website."
 
-        q_lower = question.lower().strip()
-        
-        # Check for contact-related queries
-        contact_keywords = ['contact', 'email', 'phone', 'address', 'office', 
-                          'location', 'reach', 'call', 'visit', 'where']
-        if any(kw in q_lower for kw in contact_keywords):
-            return self.get_contact_info()
-        
-        # Check cache
+        # cached?
         if q_lower in self.cache:
             return self.cache[q_lower]
 
         try:
-            docs = self.retriever.invoke(question)
-            if not docs:
-                return "I couldn't find relevant information. Please rephrase your question."
-
-            context = "\n\n".join([doc.page_content for doc in docs[:3]])
-            
-            prompt = f"""You are Syngrid AI Assistant. Answer based on the context about Syngrid Technologies.
-
-Context:
-{context[:3500]}
-
-Question: {question}
-
-Provide a clear, helpful answer (2-4 sentences):"""
-
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-
-            payload = {
-                "model": "google/gemini-flash-1.5-8b",
-                "messages": [
-                    {"role": "system", "content": "You are Syngrid AI Assistant. Provide helpful, accurate answers about Syngrid Technologies."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.4,
-                "max_tokens": 250
-            }
-
-            res = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-
-            if res.status_code == 200:
-                answer = res.json()["choices"][0]["message"]["content"].strip()
-                self.cache[q_lower] = answer
-                
-                # Save to database
-                try:
-                    db = SessionLocal()
-                    chat_entry = ChatHistory(
-                        question=question,
-                        answer=answer,
-                        timestamp=datetime.now(timezone.utc)
-                    )
-                    db.add(chat_entry)
-                    db.commit()
-                    db.close()
-                except:
-                    pass
-                
+            # retrieval
+            try:
+                docs = self.vectorstore.similarity_search(question, k=5)
+            except Exception:
+                docs = []
+            context = "\n\n".join([getattr(d, "page_content", "") for d in docs[:3]])
+            # ask LLM
+            answer = ask_openrouter(question, context)
+            # if API returned a warning message text starting with "⚠️", preserve it
+            if isinstance(answer, str) and answer.startswith("⚠️"):
                 return answer
-            else:
+            # fallback if LLM non-helpful
+            if not answer or len(answer.strip()) < 3:
                 return "⚠️ Having trouble processing that. Please try again."
-
+            self.cache[q_lower] = answer
+            # save chat to DB
+            try:
+                db = SessionLocal()
+                entry = ChatHistory(question=question, answer=answer, timestamp=datetime.now(timezone.utc))
+                db.add(entry)
+                db.commit()
+                db.close()
+            except Exception:
+                pass
+            return answer
         except Exception as e:
-            return f"⚠️ Error: {str(e)[:100]}"
+            return f"⚠️ Error: {str(e)[:200]}"
 
-# ========================================
-# SESSION STATE
-# ========================================
+# ---------------------------
+# Session state init
+# ---------------------------
 if 'ai' not in st.session_state:
     st.session_state.ai = SyngridAI()
+    # try to load existing index if present
+    st.session_state.ai.load_index_if_exists()
+
 if 'messages' not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = []  # list of (q,a)
 if 'initialized' not in st.session_state:
-    st.session_state.initialized = False
+    st.session_state.initialized = st.session_state.ai.status.get("ready", False)
 if 'question_count' not in st.session_state:
     st.session_state.question_count = 0
 if 'user_info_collected' not in st.session_state:
@@ -775,220 +512,156 @@ if 'user_info_collected' not in st.session_state:
 if 'show_user_form' not in st.session_state:
     st.session_state.show_user_form = False
 
-# ========================================
-# HEADER
-# ========================================
-st.markdown("""
+# ---------------------------
+# UI Layout
+# ---------------------------
+st.markdown(f"""
 <div class="syngrid-header">
-    <div class="syngrid-logo">⚡ SYNGRID AI ASSISTANT</div>
-    <div class="syngrid-tagline">Your Intelligent Guide to Syngrid Technologies</div>
+  <div class="syngrid-logo">⚡ SYNGRID AI ASSISTANT</div>
+  <div class="syngrid-tagline">Your intelligent guide to Syngrid Technologies — RAG powered</div>
 </div>
 """, unsafe_allow_html=True)
 
-# ========================================
-# USER INFO COLLECTION MODAL
-# ========================================
+# user info modal
 if st.session_state.show_user_form and not st.session_state.user_info_collected:
     with st.container():
         st.markdown("""
-        <div style='background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.1) 100%); 
-                    padding: 3rem; border-radius: 30px; border: 2px solid rgba(255, 255, 255, 0.3);
-                    backdrop-filter: blur(15px); margin: 2rem 0;'>
-            <h2 style='text-align: center; color: white !important; background: none !important; 
-                       -webkit-text-fill-color: white !important; margin-bottom: 1rem;'>
-                📝 Please Share Your Contact Information
-            </h2>
-            <p style='text-align: center; color: #e0f2fe !important; margin-bottom: 2rem; font-size: 1.1rem;'>
-                To continue using the assistant, we need your details
-            </p>
-        </div>
+            <div style='padding: 2rem; border-radius: 20px; background: rgba(255,255,255,0.06);'>
+                <h3 style='color:white; text-align:center;'>Please share your contact information</h3>
+                <p style='color:#e0f2fe; text-align:center;'>Optional — used only for follow-up</p>
+            </div>
         """, unsafe_allow_html=True)
-        
         with st.form("user_info_form"):
-            name = st.text_input("Full Name *", placeholder="Enter your full name")
-            email = st.text_input("Email Address *", placeholder="your.email@example.com")
-            phone = st.text_input("Phone Number * (8-15 digits, international format accepted)", 
-                                 placeholder="+1234567890 or 1234567890")
-            
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col2:
-                submitted = st.form_submit_button("✅ Submit", use_container_width=True)
-            
+            name = st.text_input("Full Name *")
+            email = st.text_input("Email Address *")
+            phone = st.text_input("Phone Number (international allowed)")
+            submitted = st.form_submit_button("Save contact")
             if submitted:
-                errors = []
+                errs = []
                 if not validate_name(name):
-                    errors.append("❌ Name must be at least 2 characters (letters only)")
+                    errs.append("Name must be at least 2 characters.")
                 if not validate_email(email):
-                    errors.append("❌ Please enter a valid email address")
-                if not validate_phone(phone):
-                    errors.append("❌ Phone must be 8-15 digits (international formats accepted)")
-                
-                if errors:
-                    for error in errors:
-                        st.error(error)
+                    errs.append("Enter valid email.")
+                if not validate_phone_flexible(phone):
+                    errs.append("Enter valid phone (7-20 digits).")
+                if errs:
+                    for e in errs:
+                        st.error(e)
                 else:
                     try:
                         db = SessionLocal()
-                        contact = UserContact(
-                            name=name.strip(),
-                            email=email.strip(),
-                            phone=phone.strip(),
-                            timestamp=datetime.now(timezone.utc)
-                        )
+                        contact = UserContact(name=name.strip(), email=email.strip(), phone=phone.strip(), timestamp=datetime.now(timezone.utc))
                         db.add(contact)
                         db.commit()
                         db.close()
-                        
                         st.session_state.user_info_collected = True
                         st.session_state.show_user_form = False
-                        st.success("✅ Thank you! Your information has been saved.")
+                        st.success("Thanks — contact saved.")
                         time.sleep(1)
-                        st.rerun()
+                        st.experimental_rerun()
                     except Exception as e:
-                        st.error(f"❌ Database error: {str(e)}")
+                        st.error("DB save error: " + str(e))
 
-# ========================================
-# INITIALIZATION SECTION
-# ========================================
+# Initialization block
 if not st.session_state.initialized:
-    st.markdown('<div class="init-section">', unsafe_allow_html=True)
-    st.markdown("### 🚀 Welcome to Syngrid AI Assistant")
-    st.markdown("Initialize the AI assistant to start exploring Syngrid Technologies' innovative solutions, services, and expertise.")
-    
+    st.markdown('<div style="padding:1rem; border-radius:14px; background: rgba(255,255,255,0.04);">', unsafe_allow_html=True)
+    st.header("🚀 Initialize Syngrid AI Assistant")
+    st.write("Crawl the site (up to 50 pages) and build the knowledge base. Requires OpenRouter API key configured.")
     if not OPENROUTER_API_KEY:
-        st.error("⚠️ **API Key Required**: Configure OPENROUTER_API_KEY in Streamlit secrets.")
-        st.info("📖 **Setup**: Go to Settings → Secrets and add: `OPENROUTER_API_KEY = \"your-key\"`")
-    
-    st.markdown("")
-    
-    col1, col2, col3 = st.columns([2, 1, 2])
-    
-    with col2:
-        if st.button("⚡ Initialize Assistant", use_container_width=True, key="init_btn", 
-                    disabled=not OPENROUTER_API_KEY):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            def update_progress(current, total):
-                progress = current / total
-                progress_bar.progress(progress)
-                status_text.markdown(
-                    f"<p style='text-align:center; color:#e0f2fe; font-size:1.2rem'>⚡ Analyzing: {current}/{total} pages</p>",
-                    unsafe_allow_html=True
-                )
-            
-            with st.spinner("🔮 Initializing Syngrid AI..."):
-                success = st.session_state.ai.initialize(
-                    SYNGRID_WEBSITE,
-                    25,
-                    update_progress
-                )
-                
-                if success:
-                    st.session_state.initialized = True
-                    st.success("✅ Assistant Ready! Reloading...")
-                    time.sleep(1.5)
-                    st.rerun()
-                else:
-                    st.error(f"❌ {st.session_state.ai.status['message']}")
-    
+        st.error("OPENROUTER_API_KEY is not configured. Set it in environment or Streamlit secrets.")
+    cols = st.columns([2,1,2])
+    if cols[1].button("⚡ Initialize Assistant", use_container_width=True, disabled=not OPENROUTER_API_KEY):
+        progress = st.progress(0)
+        status = st.empty()
+        def progress_cb(current, total):
+            pct = min(1.0, float(current) / float(total))
+            progress.progress(pct)
+            status.info(f"Scraped {current}/{total} pages...")
+        with st.spinner("Initializing (crawl + embeddings + index)..."):
+            ok = st.session_state.ai.initialize(BASE_URL, max_pages=50, progress_callback=progress_cb)
+            st.session_state.initialized = ok
+            if ok:
+                st.success("Assistant ready — knowledge base built.")
+                st.experimental_rerun()
+            else:
+                st.error(f"Initialization failed: {st.session_state.ai.status.get('message')}")
     st.markdown('</div>', unsafe_allow_html=True)
-
-# ========================================
-# CHAT INTERFACE
-# ========================================
 else:
-    # Metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("⚡ Status", "Online", delta="Ready")
-    with col2:
-        st.metric("📄 Pages Indexed", st.session_state.ai.status["pages_scraped"])
-    with col3:
-        st.metric("💬 Messages", len(st.session_state.messages))
-    
+    # Chat interface
+    cols = st.columns([3,1])
+    with cols[0]:
+        st.metric("Status", "Online" if st.session_state.ai.status.get("ready") else "Offline")
+    with cols[1]:
+        st.metric("Pages Indexed", st.session_state.ai.status.get("pages_scraped", 0))
     st.markdown("---")
-    
-    # Chat Container
-    chat_container = st.container()
-    with chat_container:
-        if len(st.session_state.messages) == 0:
-            st.markdown("""
-            <div class="welcome-container">
-                <h3>👋 Welcome to Syngrid AI!</h3>
-                <p>
-                    Ask me anything about Syngrid Technologies:<br>
-                    <strong>Services • Solutions • Technologies • Contact Info • Projects</strong>
-                </p>
+
+    # Chat display
+    if not st.session_state.messages:
+        st.markdown("""
+            <div style='padding:2rem; border-radius:16px; background: rgba(255,255,255,0.03); text-align:center;'>
+                <h3 style='color:#fff;'>👋 Welcome to Syngrid AI</h3>
+                <p style='color:#e0f2fe;'>Ask about services, solutions, technologies, contact info and more.</p>
             </div>
-            """, unsafe_allow_html=True)
-        else:
-            for q, a in st.session_state.messages:
-                st.markdown(f'<div class="user-message">👤 {q}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="bot-message">⚡ {a}</div>', unsafe_allow_html=True)
-    
+        """, unsafe_allow_html=True)
+    else:
+        for q, a in st.session_state.messages:
+            st.markdown(f'<div class="user-message">👤 {st.markdown(q)}', unsafe_allow_html=True)
+            # show bot message
+            st.markdown(f'<div class="bot-message">⚡ {a}</div>', unsafe_allow_html=True)
+
     st.markdown("---")
-    
-    # Input Section
-    col1, col2 = st.columns([5, 1])
-    
-    with col1:
-        user_input = st.text_input(
-            "Message",
-            key="user_input",
-            placeholder="💭 Ask about services, technologies, contact information...",
-            label_visibility="collapsed"
-        )
-    
-    with col2:
+    input_col, action_col = st.columns([5,1])
+    with input_col:
+        user_input = st.text_input("Message", key="user_input", placeholder="Ask about Syngrid (services, contact, technologies...)", label_visibility="collapsed")
+    with action_col:
         send = st.button("⚡ Send", use_container_width=True)
-    
+
     if send and user_input and user_input.strip():
-        # Check if need to collect user info
+        q = user_input.strip()
         st.session_state.question_count += 1
-        
-        if st.session_state.question_count == 3 and not st.session_state.user_info_collected:
-            # Answer the question first
-            with st.spinner("⚡ Thinking..."):
-                response = st.session_state.ai.ask(user_input.strip())
-                st.session_state.messages.append((user_input.strip(), response))
-            
-            # Then show the form
+        # Ask and show
+        with st.spinner("⚡ Thinking..."):
+            ans = st.session_state.ai.ask(q)
+        st.session_state.messages.append((q, ans))
+        # If it's the 3rd question and user info not collected -> show form
+        if st.session_state.question_count >= 3 and not st.session_state.user_info_collected:
             st.session_state.show_user_form = True
-            st.rerun()
-        else:
-            with st.spinner("⚡ Thinking..."):
-                response = st.session_state.ai.ask(user_input.strip())
-                st.session_state.messages.append((user_input.strip(), response))
-                st.rerun()
-    
-    # Action Buttons
+        st.experimental_rerun()
+
     st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 1])
-    
-    with col2:
+    c1, c2, c3 = st.columns([1,1,1])
+    with c1:
         if st.button("🔄 New Conversation", use_container_width=True):
             st.session_state.messages = []
             st.session_state.question_count = 0
-            st.rerun()
-    
-    with col3:
-        if st.button("⚙️ Restart Assistant", use_container_width=True):
-            st.session_state.messages = []
+            st.experimental_rerun()
+    with c2:
+        if st.button("🔁 Rebuild Knowledge Base", use_container_width=True):
+            # remove faiss index and rebuild
+            try:
+                shutil.rmtree(FAISS_DIR)
+            except Exception:
+                pass
             st.session_state.initialized = False
             st.session_state.ai = SyngridAI()
-            st.session_state.question_count = 0
-            st.session_state.user_info_collected = False
-            st.session_state.show_user_form = False
-            st.rerun()
+            st.experimental_rerun()
+    with c3:
+        if st.button("📥 Download chats (CSV)", use_container_width=True):
+            db = SessionLocal()
+            rows = db.query(ChatHistory).order_by(ChatHistory.timestamp.desc()).all()
+            import csv, io
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["id", "question", "answer", "timestamp"])
+            for r in rows:
+                writer.writerow([r.id, r.question, r.answer, r.timestamp.isoformat()])
+            st.download_button("Download chats.csv", buf.getvalue(), "chats.csv", mime="text/csv")
+            db.close()
 
-# ========================================
-# FOOTER
-# ========================================
+# Footer
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown("""
-<div style='text-align: center; color: #e0f2fe; font-size: 0.95rem; padding: 2rem;'>
-    ⚡ Powered by Syngrid Technologies | AI-Driven Innovation<br>
-    <small style='color: #cbd5e1;'>Secure • Intelligent • Always Learning</small>
+<div style='text-align:center; color:#e0f2fe; padding:1.2rem;'>
+    ⚡ Powered by Syngrid Technologies — RAG Chatbot | Keep OPENROUTER_API_KEY secret
 </div>
 """, unsafe_allow_html=True)
