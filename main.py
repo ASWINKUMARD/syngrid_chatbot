@@ -600,44 +600,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Sidebar
-with st.sidebar:
-    st.markdown("### ⚙️ Assistant Status")
-    
-    if st.session_state.initialized:
-        st.markdown('<div class="status-badge status-ready">✅ Ready to Chat</div>', unsafe_allow_html=True)
-        st.metric("Pages Scraped", st.session_state.ai.status["pages_scraped"])
-        st.metric("Emails Found", len(st.session_state.ai.company_info['emails']))
-        st.metric("Conversations", len(st.session_state.messages))
-    else:
-        st.markdown('<div class="status-badge status-loading pulse">🔄 Initializing...</div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    st.markdown("### 💡 Quick Actions")
-    if st.button("🗑️ Clear Chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.question_count = 0
-        st.rerun()
-    
-    if st.button("📞 Show Contact Info", use_container_width=True):
-        if st.session_state.initialized:
-            contact_info = st.session_state.ai.get_company_contact_info()
-            st.info(contact_info)
-    
-    st.markdown("---")
-    st.markdown("### 📊 Features")
-    st.markdown("""
-    - ✅ Real-time AI responses
-    - ✅ 40+ pages scraped
-    - ✅ Contact information
-    - ✅ Smart caching
-    - ✅ Conversation history
-    """)
-    
-    st.markdown("---")
-    st.markdown("### ℹ️ About")
-    st.markdown("Syngrid AI Assistant uses advanced NLP to answer your questions about Syngrid Technologies instantly.")
 
 # Auto-initialize on first load
 if not st.session_state.initialized:
@@ -705,7 +667,7 @@ if st.session_state.initialized:
                             db.commit()
                             db.close()
                             st.session_state.user_info_collected = True
-                            st.success("✅ Thank you! You can continue chatting.")
+                            st.success("✅ Thank you! Informations are stored, you can continue chatting.")
                             time.sleep(2)
                             st.rerun()
                         except Exception as e:
