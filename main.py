@@ -1,3 +1,9 @@
+# CRITICAL FIX: Must be FIRST imports before anything else
+# This fixes SQLite version issue on Streamlit Cloud
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
@@ -277,6 +283,7 @@ class SyngridAI:
             all_content.insert(0, header)
 
         return ("\n\n" + "="*80 + "\n\n").join(all_content)
+
 def get_company_contact_info(self):
         info = self.company_info
         if not any([info['emails'], info['phones'], info['india_address'], info['singapore_address']]):
@@ -313,31 +320,50 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             )
             chunks = splitter.split_text(content)
 
-            # CRITICAL FIX: Use sentence-transformers with proper initialization
+            if len(chunks) == 0:
+                st.error("❌ No text chunks created from scraped content.")
+                return False
+
+            # Load sentence transformer model
             from sentence_transformers import SentenceTransformer
-            import numpy as np
             
-            # Load model directly without caching decorator inside method
             st.info("📦 Loading embedding model...")
-            embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
-            st.success("✅ Embedding model loaded!")
             
-            # Create custom embeddings class that works with the loaded model
+            try:
+                embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+                st.success("✅ Embedding model loaded!")
+            except Exception as e:
+                st.error(f"❌ Failed to load embedding model: {str(e)}")
+                return False
+            
+            # Create custom embeddings class
             class CustomEmbeddings:
                 def __init__(self, model):
                     self.model = model
                 
                 def embed_documents(self, texts):
                     try:
-                        embeddings = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+                        if not texts:
+                            return []
+                        embeddings = self.model.encode(
+                            texts, 
+                            normalize_embeddings=True, 
+                            show_progress_bar=False,
+                            convert_to_numpy=True
+                        )
                         return embeddings.tolist()
                     except Exception as e:
-                        st.error(f"Embedding error: {str(e)}")
+                        st.error(f"Embedding documents error: {str(e)}")
                         raise
                 
                 def embed_query(self, text):
                     try:
-                        embedding = self.model.encode([text], normalize_embeddings=True, show_progress_bar=False)
+                        embedding = self.model.encode(
+                            [text], 
+                            normalize_embeddings=True, 
+                            show_progress_bar=False,
+                            convert_to_numpy=True
+                        )
                         return embedding[0].tolist()
                     except Exception as e:
                         st.error(f"Query embedding error: {str(e)}")
@@ -345,30 +371,38 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             
             embeddings = CustomEmbeddings(embedding_model)
 
-            # Clear any existing Chroma directory to prevent conflicts
+            # Clear any existing Chroma directory
             chroma_dir = "./syngrid_chroma"
             if os.path.exists(chroma_dir):
                 import shutil
                 try:
                     shutil.rmtree(chroma_dir)
+                    st.info("🗑️ Cleared old vector database")
                 except Exception as e:
                     st.warning(f"Could not remove old chroma directory: {str(e)}")
 
             st.info("🗄️ Creating vector database...")
-            vectorstore = Chroma.from_texts(
-                chunks, 
-                embedding=embeddings, 
-                persist_directory=chroma_dir
-            )
+            
+            try:
+                vectorstore = Chroma.from_texts(
+                    texts=chunks,
+                    embedding=embeddings,
+                    persist_directory=chroma_dir
+                )
+                st.success("✅ Vector database created!")
+            except Exception as e:
+                st.error(f"❌ Failed to create vector database: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+                return False
             
             self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             self.status["ready"] = True
-            st.success("✅ Vector database created!")
             return True
             
         except AttributeError as e:
             st.error(f"❌ AttributeError: {str(e)}")
-            st.error("This usually means a library version mismatch. Check your requirements.txt")
+            st.error("💡 This usually means a library compatibility issue.")
             import traceback
             st.code(traceback.format_exc())
             return False
@@ -447,7 +481,7 @@ Answer in 2–4 sentences, focusing on the most relevant information."""
         except Exception as e:
             return f"⚠️ Error: {str(e)}"
 
-def save_to_db(self, question, answer):
+    def save_to_db(self, question, answer):
         db = None
         try:
             db = SessionLocal()
