@@ -1,1 +1,8 @@
-streamlit requests beautifulsoup4 langchain langchain-community sentence-transformers chromadb sqlalchemy
+streamlit
+requests 
+beautifulsoup4 
+langchain 
+langchain-community 
+sentence-transformers
+chromadb 
+sqlalchemy
