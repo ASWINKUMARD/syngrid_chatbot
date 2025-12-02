@@ -17,70 +17,6 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import re
 import os
 import time
-import numpy as np
-
-# Page Configuration
-st.set_page_config(
-    page_title="Syngrid AI Assistant",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for UI - FIXED SIDEBAR VISIBILITY
-st.markdown("""
-<style>
-    .main { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    [data-testid="stSidebar"] { 
-        background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%); 
-    }
-    /* FIXED: Sidebar text visibility */
-    [data-testid="stSidebar"] .element-container,
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] h1,
-    [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3,
-    [data-testid="stSidebar"] .stMarkdown {
-        color: #ffffff !important;
-    }
-    [data-testid="stSidebar"] .stMetric label {
-        color: #e2e8f0 !important;
-    }
-    [data-testid="stSidebar"] .stMetric [data-testid="stMetricValue"] {
-        color: #ffffff !important;
-    }
-    
-    .header-container { 
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem; 
-        border-radius: 20px; 
-        margin-bottom: 2rem; 
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3); 
-        text-align: center; 
-    }
-    .header-title { color: white; font-size: 3rem; font-weight: bold; margin: 0; }
-    .header-subtitle { color: rgba(255,255,255,0.9); font-size: 1.2rem; margin-top: 0.5rem; }
-    .status-badge { 
-        padding: 0.5rem 1rem; 
-        border-radius: 20px; 
-        font-weight: bold; 
-        display: inline-block;
-        margin: 0.5rem 0;
-    }
-    .status-ready { background: #10b981; color: white; }
-    .status-loading { background: #f59e0b; color: white; }
-    
-    /* Contact form styling */
-    .contact-form {
-        background: white;
-        padding: 2rem;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # Database Configuration
 DATABASE_URL = "sqlite:///./syngrid_chat.db"
@@ -265,7 +201,7 @@ class SyngridAI:
                     if next_url not in visited and self.is_valid_url(next_url, base_domain):
                         q.append(next_url)
 
-            except Exception as e:
+            except Exception:
                 continue
 
         self.status["pages_scraped"] = len(visited)
@@ -284,7 +220,7 @@ class SyngridAI:
 
         return ("\n\n" + "="*80 + "\n\n").join(all_content)
 
-def get_company_contact_info(self):
+    def get_company_contact_info(self):
         info = self.company_info
         if not any([info['emails'], info['phones'], info['india_address'], info['singapore_address']]):
             return "No contact details found."
@@ -301,9 +237,8 @@ def get_company_contact_info(self):
 
         return msg.strip()
 
-def initialize(self, url, max_pages=40, progress_callback=None):
+    def initialize(self, url, max_pages=40, progress_callback=None):
         try:
-            # Validate API key
             if not OPENROUTER_API_KEY:
                 st.error("❌ OPENROUTER_API_KEY not found in environment variables!")
                 return False
@@ -324,7 +259,6 @@ def initialize(self, url, max_pages=40, progress_callback=None):
                 st.error("❌ No text chunks created from scraped content.")
                 return False
 
-            # Load sentence transformer model
             from sentence_transformers import SentenceTransformer
             
             st.info("📦 Loading embedding model...")
@@ -336,7 +270,6 @@ def initialize(self, url, max_pages=40, progress_callback=None):
                 st.error(f"❌ Failed to load embedding model: {str(e)}")
                 return False
             
-            # Create custom embeddings class
             class CustomEmbeddings:
                 def __init__(self, model):
                     self.model = model
@@ -371,7 +304,6 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             
             embeddings = CustomEmbeddings(embedding_model)
 
-            # Clear any existing Chroma directory
             chroma_dir = "./syngrid_chroma"
             if os.path.exists(chroma_dir):
                 import shutil
@@ -400,35 +332,26 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             self.status["ready"] = True
             return True
             
-        except AttributeError as e:
-            st.error(f"❌ AttributeError: {str(e)}")
-            st.error("💡 This usually means a library compatibility issue.")
-            import traceback
-            st.code(traceback.format_exc())
-            return False
         except Exception as e:
             st.error(f"❌ Initialization Error: {str(e)}")
             import traceback
             st.code(traceback.format_exc())
             return False
 
-def ask(self, question):
+    def ask(self, question):
         if not self.status["ready"]:
             return "⚠️ Initialization still in progress."
 
         q_lower = question.lower().strip()
 
-        # Greeting Override 
         greetings = ["hi", "hello", "hey", "hai", "hii", "helloo", "hi there", "hello there"]
         if q_lower in greetings:
             return "Hi, I'm Syngrid AI Assistant. How can I assist you?"
 
-        # Contact info detection
         contact_words = ["email", "contact", "phone", "address", "office", "location", "reach", "call"]
         if any(k in q_lower for k in contact_words):
             return self.get_company_contact_info()
 
-        # Check cache
         if q_lower in self.cache:
             return self.cache[q_lower]
 
@@ -481,7 +404,7 @@ Answer in 2–4 sentences, focusing on the most relevant information."""
         except Exception as e:
             return f"⚠️ Error: {str(e)}"
 
-def save_to_db(self, question, answer):
+    def save_to_db(self, question, answer):
         db = None
         try:
             db = SessionLocal()
@@ -492,11 +415,70 @@ def save_to_db(self, question, answer):
         finally:
             if db:
                 db.close()
+# ===== ADD THIS TO THE END OF PART 1 CODE =====
 
+# Page Configuration
+st.set_page_config(
+    page_title="Syngrid AI Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# ==============================
+# Custom CSS for UI
+st.markdown("""
+<style>
+    .main { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    [data-testid="stSidebar"] { 
+        background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%); 
+    }
+    [data-testid="stSidebar"] .element-container,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] .stMarkdown {
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebar"] .stMetric label {
+        color: #e2e8f0 !important;
+    }
+    [data-testid="stSidebar"] .stMetric [data-testid="stMetricValue"] {
+        color: #ffffff !important;
+    }
+    
+    .header-container { 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem; 
+        border-radius: 20px; 
+        margin-bottom: 2rem; 
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3); 
+        text-align: center; 
+    }
+    .header-title { color: white; font-size: 3rem; font-weight: bold; margin: 0; }
+    .header-subtitle { color: rgba(255,255,255,0.9); font-size: 1.2rem; margin-top: 0.5rem; }
+    .status-badge { 
+        padding: 0.5rem 1rem; 
+        border-radius: 20px; 
+        font-weight: bold; 
+        display: inline-block;
+        margin: 0.5rem 0;
+    }
+    .status-ready { background: #10b981; color: white; }
+    .status-loading { background: #f59e0b; color: white; }
+    
+    .contact-form {
+        background: white;
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Initialize session state
-# ==============================
 if "ai" not in st.session_state:
     st.session_state.ai = SyngridAI()
     st.session_state.initialized = False
@@ -504,9 +486,7 @@ if "ai" not in st.session_state:
     st.session_state.question_count = 0
     st.session_state.user_info_collected = False
 
-# ==============================
 # Header
-# ==============================
 st.markdown("""
 <div class="header-container">
     <h1 class="header-title">🤖 Syngrid AI Assistant</h1>
@@ -514,10 +494,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-
-# ==============================
-# 🔥 SIDEBAR WITH DB DOWNLOAD
-# ==============================
+# Sidebar
 with st.sidebar:
     st.markdown("### ⚙️ Assistant Status")
 
@@ -555,10 +532,7 @@ with st.sidebar:
         st.session_state.ai = SyngridAI()
         st.rerun()
 
-
-# ==============================
-# 🔥 AUTO-INITIALIZE AI SCRAPER
-# ==============================
+# Auto-initialize AI scraper
 if not st.session_state.initialized:
     with st.spinner("🚀 Initializing Syngrid AI Assistant…"):
         bar = st.progress(0)
@@ -581,10 +555,7 @@ if not st.session_state.initialized:
             st.error("❌ Initialization failed. Check logs above.")
             st.stop()
 
-
-# ==============================
-# 🔥 CHAT INTERFACE
-# ==============================
+# Chat interface
 if st.session_state.initialized:
 
     # Display chat history
@@ -662,10 +633,7 @@ if st.session_state.initialized:
                 st.session_state.messages.append({"role": "assistant", "content": answer})
                 st.session_state.ai.save_to_db(user_input, answer)
 
-
-# ==============================
 # Footer
-# ==============================
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; opacity: 0.8; padding: 20px; color: white;'>
