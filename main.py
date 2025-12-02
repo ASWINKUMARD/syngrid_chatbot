@@ -295,7 +295,7 @@ def get_company_contact_info(self):
 
         return msg.strip()
 
-def initialize(self, url, max_pages=40, progress_callback=None):
+    def initialize(self, url, max_pages=40, progress_callback=None):
         try:
             # Validate API key
             if not OPENROUTER_API_KEY:
@@ -314,19 +314,28 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             )
             chunks = splitter.split_text(content)
 
-            # FIXED: HuggingFace Embeddings initialization with proper device handling
-            # This fixes the "meta tensor" error in Streamlit Cloud
-            embeddings = HuggingFaceEmbeddings(
-                model_name="all-MiniLM-L6-v2",
-                model_kwargs={
-                    'device': 'cpu',
-                    'trust_remote_code': False
-                },
-                encode_kwargs={
-                    'normalize_embeddings': True,
-                    'batch_size': 32
-                }
-            )
+            # CRITICAL FIX: Use sentence-transformers directly to avoid meta tensor error
+            from sentence_transformers import SentenceTransformer
+            
+            # Download and cache the model properly
+            @st.cache_resource
+            def load_embedding_model():
+                return SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+            
+            embedding_model = load_embedding_model()
+            
+            # Create custom embeddings class that works with the loaded model
+            class CustomEmbeddings:
+                def __init__(self, model):
+                    self.model = model
+                
+                def embed_documents(self, texts):
+                    return self.model.encode(texts, normalize_embeddings=True).tolist()
+                
+                def embed_query(self, text):
+                    return self.model.encode([text], normalize_embeddings=True)[0].tolist()
+            
+            embeddings = CustomEmbeddings(embedding_model)
 
             # Clear any existing Chroma directory to prevent conflicts
             chroma_dir = "./syngrid_chroma"
@@ -350,7 +359,7 @@ def initialize(self, url, max_pages=40, progress_callback=None):
             st.error(f"Traceback: {traceback.format_exc()}")
             return False
 
-def ask(self, question):
+    def ask(self, question):
         if not self.status["ready"]:
             return "⚠️ Initialization still in progress."
 
@@ -419,7 +428,7 @@ Answer in 2–4 sentences, focusing on the most relevant information."""
         except Exception as e:
             return f"⚠️ Error: {str(e)}"
 
-def save_to_db(self, question, answer):
+    def save_to_db(self, question, answer):
         db = None
         try:
             db = SessionLocal()
