@@ -2,6 +2,9 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 from collections import deque
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
@@ -9,15 +12,6 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import re
 import os
 import time
-import sys
-
-# Fix for Streamlit Cloud sqlite3 issue
-__import__('pysqlite3')
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 
 # Page Configuration
 st.set_page_config(
@@ -27,403 +21,141 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Enhanced Custom CSS for Stunning UI
+# Custom CSS for stunning UI
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
-    
-    * {
-        font-family: 'Poppins', sans-serif;
-    }
-    
-    /* Animated gradient background */
+    /* Main background gradient */
     .main {
-        background: linear-gradient(-45deg, #667eea, #764ba2, #f093fb, #4facfe);
-        background-size: 400% 400%;
-        animation: gradientShift 15s ease infinite;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
     
-    @keyframes gradientShift {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    
-    /* Glassmorphism chat container */
+    /* Chat container */
     .stChatFloatingInputContainer {
-        background: rgba(255, 255, 255, 0.15);
-        backdrop-filter: blur(20px);
-        border-radius: 25px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        padding: 15px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 10px;
     }
     
-    /* Enhanced sidebar */
+    /* Sidebar styling */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%);
     }
     
-    [data-testid="stSidebar"] > div:first-child {
-        background: transparent;
-    }
-    
-    /* Stunning header with animation */
+    /* Custom header */
     .header-container {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 3rem 2rem;
-        border-radius: 30px;
+        padding: 2rem;
+        border-radius: 20px;
         margin-bottom: 2rem;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         text-align: center;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .header-container::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
-        animation: shine 3s infinite;
-    }
-    
-    @keyframes shine {
-        0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
-        100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
     }
     
     .header-title {
         color: white;
-        font-size: 3.5rem;
-        font-weight: 700;
+        font-size: 3rem;
+        font-weight: bold;
         margin: 0;
-        text-shadow: 3px 3px 6px rgba(0,0,0,0.3);
-        animation: titleFloat 3s ease-in-out infinite;
-        position: relative;
-        z-index: 1;
-    }
-    
-    @keyframes titleFloat {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
     
     .header-subtitle {
-        color: rgba(255,255,255,0.95);
-        font-size: 1.3rem;
-        margin-top: 1rem;
-        font-weight: 300;
-        position: relative;
-        z-index: 1;
+        color: rgba(255,255,255,0.9);
+        font-size: 1.2rem;
+        margin-top: 0.5rem;
     }
     
-    .header-tagline {
-        color: rgba(255,255,255,0.85);
-        font-size: 1rem;
-        margin-top: 0.8rem;
-        font-weight: 400;
-        position: relative;
-        z-index: 1;
-    }
-    
-    /* Status badges with glow */
+    /* Status badges */
     .status-badge {
         display: inline-block;
-        padding: 0.7rem 1.5rem;
-        border-radius: 25px;
-        font-weight: 600;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-weight: bold;
         margin: 0.5rem;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        transition: all 0.3s ease;
-    }
-    
-    .status-badge:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 25px rgba(0,0,0,0.4);
     }
     
     .status-ready {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
         color: white;
-        animation: pulseGlow 2s infinite;
-    }
-    
-    @keyframes pulseGlow {
-        0%, 100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
-        50% { box-shadow: 0 0 40px rgba(16, 185, 129, 0.8); }
     }
     
     .status-loading {
         background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
         color: white;
-        animation: pulse 2s infinite;
     }
     
-    /* Enhanced chat messages */
+    /* Chat messages */
     .stChatMessage {
         background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(15px);
-        border-radius: 20px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        animation: slideIn 0.3s ease-out;
-    }
-    
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    /* User message styling */
-    [data-testid="stChatMessageContent"] {
-        color: white;
-        font-size: 1.05rem;
-        line-height: 1.6;
-    }
-    
-    /* Metrics with gradient */
-    [data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.1);
         backdrop-filter: blur(10px);
-        padding: 1rem;
         border-radius: 15px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        transition: all 0.3s ease;
+        padding: 1rem;
+        margin: 0.5rem 0;
     }
     
-    [data-testid="stMetric"]:hover {
-        transform: scale(1.05);
-        background: rgba(255, 255, 255, 0.15);
-    }
-    
+    /* Metrics */
     [data-testid="stMetricValue"] {
-        font-size: 2.5rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        font-size: 2rem;
+        font-weight: bold;
+        color: #667eea;
     }
     
-    [data-testid="stMetricLabel"] {
-        color: rgba(255, 255, 255, 0.9);
-        font-weight: 500;
-        font-size: 1rem;
-    }
-    
-    /* Enhanced buttons */
+    /* Buttons */
     .stButton>button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
-        border-radius: 15px;
-        padding: 0.7rem 2rem;
-        font-weight: 600;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .stButton>button::before {
-        content: '';
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 0;
-        height: 0;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.3);
-        transform: translate(-50%, -50%);
-        transition: width 0.6s, height 0.6s;
-    }
-    
-    .stButton>button:hover::before {
-        width: 300px;
-        height: 300px;
+        border-radius: 10px;
+        padding: 0.5rem 2rem;
+        font-weight: bold;
+        transition: transform 0.2s;
     }
     
     .stButton>button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.6);
+        transform: scale(1.05);
     }
     
-    /* Form styling */
-    .stTextInput>div>div>input {
-        background: rgba(255, 255, 255, 0.9);
-        border: 2px solid rgba(102, 126, 234, 0.3);
-        border-radius: 12px;
-        padding: 0.8rem;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-    }
-    
-    .stTextInput>div>div>input:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 20px rgba(102, 126, 234, 0.4);
-        background: white;
+    /* Info boxes */
+    .info-box {
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 15px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        border-left: 4px solid #667eea;
     }
     
     /* Contact form */
     .contact-form {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.9));
-        padding: 2.5rem;
-        border-radius: 25px;
-        box-shadow: 0 15px 50px rgba(0,0,0,0.3);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.5);
-    }
-    
-    /* Info boxes with gradient border */
-    .info-box {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(15px);
+        background: rgba(255, 255, 255, 0.95);
+        padding: 2rem;
         border-radius: 20px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border-left: 5px solid;
-        border-image: linear-gradient(135deg, #667eea 0%, #764ba2 100%) 1;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
     }
     
     /* Animations */
     @keyframes pulse {
         0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
+        50% { opacity: 0.5; }
     }
     
     .pulse {
         animation: pulse 2s infinite;
     }
     
-    /* Custom scrollbar */
+    /* Scrollbar */
     ::-webkit-scrollbar {
-        width: 12px;
+        width: 10px;
     }
     
     ::-webkit-scrollbar-track {
         background: rgba(255, 255, 255, 0.1);
-        border-radius: 10px;
     }
     
     ::-webkit-scrollbar-thumb {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 10px;
-        border: 2px solid rgba(255, 255, 255, 0.2);
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-    }
-    
-    /* Progress bar styling */
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    /* Spinner styling */
-    .stSpinner > div {
-        border-top-color: #667eea !important;
-    }
-    
-    /* Expander styling */
-    .streamlit-expanderHeader {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 12px;
-        color: white;
-        font-weight: 600;
-    }
-    
-    .streamlit-expanderHeader:hover {
-        background: rgba(255, 255, 255, 0.15);
-    }
-    
-    /* Chat input styling */
-    .stChatInputContainer > div {
-        background: rgba(255, 255, 255, 0.15);
-        backdrop-filter: blur(20px);
-        border-radius: 25px;
-    }
-    
-    /* Sidebar text color */
-    [data-testid="stSidebar"] * {
-        color: rgba(255, 255, 255, 0.95);
-    }
-    
-    /* Success/Error messages */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        border-left: 4px solid;
-        padding: 1rem;
-    }
-    
-    /* Feature list styling */
-    .feature-item {
-        padding: 0.5rem 0;
-        font-size: 1rem;
-        color: rgba(255, 255, 255, 0.9);
-        transition: all 0.3s ease;
-    }
-    
-    .feature-item:hover {
-        transform: translateX(5px);
-        color: white;
-    }
-    
-    /* Footer styling */
-    .footer-container {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 2rem;
-        margin-top: 2rem;
-        text-align: center;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    
-    /* Icon styling */
-    .icon-wrapper {
-        display: inline-block;
-        animation: bounce 2s infinite;
-    }
-    
-    @keyframes bounce {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-10px); }
-    }
-    
-    /* Glassmorphism card */
-    .glass-card {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(15px);
-        border-radius: 20px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-        transition: all 0.3s ease;
-    }
-    
-    .glass-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+        border-radius: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -452,10 +184,10 @@ class UserContact(Base):
 Base.metadata.create_all(bind=engine)
 
 # Configuration
-SYNGRID_WEBSITE = "https://syngrid.com/"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "meta-llama/llama-3.2-3b-instruct:free"
+SYNGRID_WEBSITE = "https://syngrid.com/"
+MODEL = "kwaipilot/kat-coder-pro:free"
 
 PRIORITY_PAGES = [
     "", "about", "about-us", "services", "solutions", "products", 
@@ -744,6 +476,7 @@ class SyngridAI:
     def initialize(self, url, max_pages=40, progress_callback=None):
         try:
             content = self.scrape_website(url, max_pages, progress_callback)
+
             if len(content) < 1000:
                 return False
 
@@ -778,41 +511,6 @@ class SyngridAI:
             st.error(f"Initialization Error: {str(e)}")
             return False
 
-    def extract_answer_from_context(self, question, context):
-        """Smart context extraction when API is unavailable"""
-        q_lower = question.lower()
-        
-        sentences = []
-        for chunk in context.split('\n'):
-            chunk = chunk.strip()
-            if len(chunk) > 50:
-                sentences.append(chunk)
-        
-        relevant_sentences = []
-        question_words = set(q_lower.split())
-        
-        for sentence in sentences:
-            sentence_lower = sentence.lower()
-            matches = sum(1 for word in question_words if len(word) > 3 and word in sentence_lower)
-            if matches > 0:
-                relevant_sentences.append((matches, sentence))
-        
-        relevant_sentences.sort(reverse=True, key=lambda x: x[0])
-        
-        if relevant_sentences:
-            top_sentences = [sent[1] for sent in relevant_sentences[:3]]
-            answer = " ".join(top_sentences)
-            
-            if len(answer) > 500:
-                answer = answer[:500] + "..."
-            
-            return answer
-        else:
-            preview = " ".join(sentences[:2])
-            if len(preview) > 400:
-                preview = preview[:400] + "..."
-            return preview if preview else "I found information but couldn't extract a specific answer. Please try rephrasing your question."
-
     def ask(self, question):
         if not self.status["ready"]:
             return "⚠️ Please wait for initialization to complete."
@@ -833,11 +531,6 @@ class SyngridAI:
                 return "I couldn't find relevant information. Could you rephrase?"
 
             context = "\n\n".join([doc.page_content for doc in docs])
-
-            if not USE_AI_API or not OPENROUTER_API_KEY:
-                answer = self.extract_answer_from_context(question, context)
-                self.cache[q_lower] = answer
-                return answer
 
             prompt = f"""You are Syngrid AI Assistant. Answer based on the provided context about Syngrid Technologies.
 
@@ -874,17 +567,12 @@ Provide a helpful, accurate answer in 2-4 sentences."""
                     self.cache[q_lower] = answer
                     return answer
                 else:
-                    return self.extract_answer_from_context(question, context)
+                    return "I'm having trouble generating a response. Please try again."
             else:
-                return self.extract_answer_from_context(question, context)
+                return f"⚠️ API Error (Status {response.status_code})"
 
         except Exception as e:
-            try:
-                docs = self.retriever.invoke(question)
-                context = "\n\n".join([doc.page_content for doc in docs])
-                return self.extract_answer_from_context(question, context)
-            except:
-                return f"⚠️ Error: {str(e)}"
+            return f"⚠️ Error: {str(e)}"
 
     def save_to_db(self, question, answer):
         try:
@@ -904,145 +592,71 @@ if 'ai' not in st.session_state:
     st.session_state.question_count = 0
     st.session_state.user_info_collected = False
 
-# Stunning Header
+# Header
 st.markdown("""
 <div class="header-container">
-    <h1 class="header-title">
-        <span class="icon-wrapper">🤖</span> Syngrid AI Assistant
-    </h1>
-    <p class="header-subtitle">Powered by Advanced AI & Machine Learning</p>
-    <p class="header-tagline">✨ Instant Answers | Smart Context Matching | 40+ Pages Knowledge Base</p>
+    <h1 class="header-title">🤖 Syngrid AI Assistant</h1>
+    <p class="header-subtitle">Powered by Advanced AI | Instant Answers About Syngrid Technologies</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Enhanced Sidebar
+# Sidebar
 with st.sidebar:
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Status Section
-    st.markdown("### ⚡ Assistant Status")
+    st.markdown("### ⚙️ Assistant Status")
     
     if st.session_state.initialized:
-        st.markdown('<div class="status-badge status-ready">✅ Online & Ready</div>', unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📄 Pages", st.session_state.ai.status["pages_scraped"])
-        with col2:
-            st.metric("📧 Emails", len(st.session_state.ai.company_info['emails']))
-        with col3:
-            st.metric("💬 Chats", len(st.session_state.messages))
+        st.markdown('<div class="status-badge status-ready">✅ Ready to Chat</div>', unsafe_allow_html=True)
+        st.metric("Pages Scraped", st.session_state.ai.status["pages_scraped"])
+        st.metric("Emails Found", len(st.session_state.ai.company_info['emails']))
+        st.metric("Conversations", len(st.session_state.messages))
     else:
-        st.markdown('<div class="status-badge status-loading pulse">🔄 Initializing AI...</div>', unsafe_allow_html=True)
-        st.info("⏳ Scraping website and building knowledge base...")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # AI Configuration
-    st.markdown("### 🔑 AI Enhancement (Optional)")
-    st.markdown("**Currently using: Smart Context Matching** ✨")
-    
-    with st.expander("🚀 Upgrade to Advanced AI"):
-        st.markdown("""
-        <div class="glass-card">
-        <p style='font-size: 0.9rem;'>For even better responses, add a free API key:</p>
-        <ul style='font-size: 0.85rem;'>
-            <li>🔗 <a href='https://openrouter.ai/keys' target='_blank'>OpenRouter</a> - Free tier available</li>
-            <li>⚡ <a href='https://console.groq.com' target='_blank'>Groq</a> - Lightning fast & free</li>
-            <li>🎯 <a href='https://api.together.xyz' target='_blank'>Together AI</a> - Free credits</li>
-        </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        api_key_input = st.text_input("API Key (Optional)", type="password", placeholder="sk-or-v1-...")
-        
-        if api_key_input:
-            global OPENROUTER_API_KEY, USE_AI_API
-            OPENROUTER_API_KEY = api_key_input
-            USE_AI_API = True
-            st.success("✅ Advanced AI Enabled!")
+        st.markdown('<div class="status-badge status-loading pulse">🔄 Initializing...</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Quick Actions
-    st.markdown("### ⚡ Quick Actions")
+    st.markdown("### 💡 Quick Actions")
+    if st.button("🗑️ Clear Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.question_count = 0
+        st.rerun()
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("🗑️ Clear", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.question_count = 0
-            st.rerun()
-    
-    with col2:
-        if st.button("📞 Contact", use_container_width=True):
-            if st.session_state.initialized:
-                contact_info = st.session_state.ai.get_company_contact_info()
-                st.info(contact_info)
+    if st.button("📞 Show Contact Info", use_container_width=True):
+        if st.session_state.initialized:
+            contact_info = st.session_state.ai.get_company_contact_info()
+            st.info(contact_info)
     
     st.markdown("---")
-    
-    # Features Section
-    st.markdown("### ✨ Features")
+    st.markdown("### 📊 Features")
     st.markdown("""
-    <div class="glass-card">
-        <div class="feature-item">⚡ Lightning-fast responses</div>
-        <div class="feature-item">🧠 Smart AI matching</div>
-        <div class="feature-item">📚 40+ pages knowledge</div>
-        <div class="feature-item">💾 Auto conversation save</div>
-        <div class="feature-item">🔒 Secure & private</div>
-        <div class="feature-item">🎨 Beautiful interface</div>
-    </div>
-    """, unsafe_allow_html=True)
+    - ✅ Real-time AI responses
+    - ✅ 40+ pages scraped
+    - ✅ Contact information
+    - ✅ Smart caching
+    - ✅ Conversation history
+    """)
     
     st.markdown("---")
-    
-    # About Section
     st.markdown("### ℹ️ About")
-    st.markdown("""
-    <div class="glass-card" style='font-size: 0.85rem;'>
-        <p><strong>Syngrid AI Assistant</strong> uses advanced Natural Language Processing to provide instant, accurate answers about Syngrid Technologies.</p>
-        <p style='margin-top: 0.5rem;'>Built with ❤️ using Streamlit, LangChain & HuggingFace.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("Syngrid AI Assistant uses advanced NLP to answer your questions about Syngrid Technologies instantly.")
 
 # Auto-initialize on first load
 if not st.session_state.initialized:
-    st.markdown("""
-    <div class="glass-card" style='text-align: center; padding: 2rem;'>
-        <h3 style='color: white; margin-bottom: 1rem;'>🚀 Initializing Syngrid AI Assistant</h3>
-        <p style='color: rgba(255,255,255,0.8);'>Please wait while we scrape and process the Syngrid website...</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    with st.spinner(""):
+    with st.spinner("🚀 Initializing Syngrid AI Assistant..."):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
         def update_progress(current, total, url):
             progress = current / total
             progress_bar.progress(progress)
-            status_text.markdown(f"""
-            <div class="glass-card">
-                <p style='color: white; margin: 0;'>📄 Scraping page <strong>{current}/{total}</strong></p>
-                <p style='color: rgba(255,255,255,0.7); font-size: 0.85rem; margin: 0.5rem 0 0 0;'>{url[:60]}...</p>
-            </div>
-            """, unsafe_allow_html=True)
+            status_text.text(f"Scraping page {current}/{total}: {url[:50]}...")
         
         success = st.session_state.ai.initialize(SYNGRID_WEBSITE, max_pages=40, progress_callback=update_progress)
         
         if success:
             st.session_state.initialized = True
             progress_bar.progress(1.0)
-            status_text.markdown("""
-            <div class="glass-card" style='text-align: center;'>
-                <h3 style='color: #10b981; margin: 0;'>✅ Initialization Complete!</h3>
-                <p style='color: rgba(255,255,255,0.8); margin: 0.5rem 0 0 0;'>Ready to answer your questions</p>
-            </div>
-            """, unsafe_allow_html=True)
-            time.sleep(2)
+            status_text.text("✅ Initialization complete!")
+            time.sleep(1)
             st.rerun()
         else:
             st.error("❌ Failed to initialize. Please refresh the page.")
@@ -1050,69 +664,37 @@ if not st.session_state.initialized:
 
 # Chat Interface
 if st.session_state.initialized:
-    # Welcome message on first load
-    if len(st.session_state.messages) == 0:
-        st.markdown("""
-        <div class="glass-card" style='margin: 2rem 0;'>
-            <h3 style='color: white; margin-bottom: 1rem;'>👋 Welcome to Syngrid AI Assistant!</h3>
-            <p style='color: rgba(255,255,255,0.9); margin-bottom: 0.5rem;'>I'm here to help you learn about Syngrid Technologies. You can ask me:</p>
-            <ul style='color: rgba(255,255,255,0.8);'>
-                <li>📞 Contact information and office locations</li>
-                <li>💼 Services and solutions offered</li>
-                <li>🏢 Company information and expertise</li>
-                <li>👥 Team and career opportunities</li>
-                <li>🔧 Technologies and industries served</li>
-            </ul>
-            <p style='color: rgba(255,255,255,0.9); margin-top: 1rem;'><strong>Try asking:</strong> "What services does Syngrid offer?" or "How can I contact Syngrid?"</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
     # Display chat messages
     for message in st.session_state.messages:
-        with st.chat_message(message["role"], avatar="👤" if message["role"] == "user" else "🤖"):
+        with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
     # Chat input
-    if prompt := st.chat_input("💬 Ask me anything about Syngrid Technologies..."):
-        # Add user message
+    if prompt := st.chat_input("Ask me anything about Syngrid Technologies..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="👤"):
+        with st.chat_message("user"):
             st.markdown(prompt)
         
         st.session_state.question_count += 1
         
         # Show contact form after 3 questions
         if st.session_state.question_count == 3 and not st.session_state.user_info_collected:
-            with st.chat_message("assistant", avatar="🤖"):
+            with st.chat_message("assistant"):
                 response = st.session_state.ai.ask(prompt)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.session_state.ai.save_to_db(prompt, response)
             
             st.markdown("---")
-            st.markdown("""
-            <div class="contact-form">
-                <h3 style='text-align: center; color: #667eea; margin-bottom: 1.5rem;'>📋 Continue Chatting</h3>
-                <p style='text-align: center; color: #666; margin-bottom: 1.5rem;'>Please provide your contact information to continue using the assistant</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="contact-form">', unsafe_allow_html=True)
+            st.markdown("### 📋 Please provide your contact information to continue")
             
             with st.form("contact_form"):
-                col1, col2 = st.columns(2)
+                name = st.text_input("Full Name *", placeholder="John Doe")
+                email = st.text_input("Email Address *", placeholder="john@example.com")
+                phone = st.text_input("Phone Number *", placeholder="+91 98765 43210")
                 
-                with col1:
-                    name = st.text_input("👤 Full Name *", placeholder="John Doe")
-                    phone = st.text_input("📱 Phone Number *", placeholder="+91 98765 43210")
-                
-                with col2:
-                    email = st.text_input("📧 Email Address *", placeholder="john@example.com")
-                    company = st.text_input("🏢 Company (Optional)", placeholder="Your Company")
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                col1, col2, col3 = st.columns([1, 2, 1])
-                with col2:
-                    submitted = st.form_submit_button("✅ Submit & Continue Chatting", use_container_width=True)
+                submitted = st.form_submit_button("Submit & Continue", use_container_width=True)
                 
                 if submitted:
                     if name and email and phone:
@@ -1123,40 +705,30 @@ if st.session_state.initialized:
                             db.commit()
                             db.close()
                             st.session_state.user_info_collected = True
-                            st.success("✅ Thank you! You can continue chatting now.")
+                            st.success("✅ Thank you! You can continue chatting.")
                             time.sleep(2)
                             st.rerun()
                         except Exception as e:
-                            st.error("❌ Failed to save contact info. Please try again.")
+                            st.error("Failed to save contact info. Please try again.")
                     else:
-                        st.error("❌ Please fill all required fields (Name, Email, Phone)")
+                        st.error("Please fill all fields.")
             
+            st.markdown('</div>', unsafe_allow_html=True)
             st.stop()
         
         # Normal response
-        with st.chat_message("assistant", avatar="🤖"):
-            with st.spinner("🤔 Thinking..."):
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
                 response = st.session_state.ai.ask(prompt)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.session_state.ai.save_to_db(prompt, response)
 
-# Stunning Footer
-st.markdown("<br><br>", unsafe_allow_html=True)
+# Footer
 st.markdown("---")
 st.markdown("""
-<div class="footer-container">
-    <p style='color: rgba(255,255,255,0.9); font-size: 1.1rem; margin-bottom: 0.5rem;'>
-        <strong>🤖 Powered by Syngrid AI</strong>
-    </p>
-    <p style='color: rgba(255,255,255,0.7); font-size: 0.9rem; margin-bottom: 1rem;'>
-        Built with 💜 using Streamlit, LangChain, HuggingFace & OpenRouter
-    </p>
-    <p style='color: rgba(255,255,255,0.6); font-size: 0.85rem;'>
-        © 2025 Syngrid Technologies. All rights reserved.
-    </p>
-    <p style='color: rgba(255,255,255,0.5); font-size: 0.75rem; margin-top: 0.5rem;'>
-        🌐 Visit us at <a href='https://syngrid.com' target='_blank' style='color: #667eea;'>syngrid.com</a>
-    </p>
+<div style='text-align: center; color: rgba(255,255,255,0.7); padding: 2rem;'>
+    <p>🤖 Powered by Syngrid AI | Built with Streamlit & OpenRouter</p>
+    <p>© 2025 Syngrid Technologies. All rights reserved.</p>
 </div>
 """, unsafe_allow_html=True)
