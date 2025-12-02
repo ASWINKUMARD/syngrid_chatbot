@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import re
 import os
 import time
+import torch
 
 # Page Configuration
 st.set_page_config(
@@ -21,18 +22,58 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for UI
+# Custom CSS for UI - FIXED SIDEBAR VISIBILITY
 st.markdown("""
 <style>
     .main { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%); }
-    .header-container { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem; border-radius: 20px; margin-bottom: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; }
+    [data-testid="stSidebar"] { 
+        background: linear-gradient(180deg, #2d3748 0%, #1a202c 100%); 
+    }
+    /* FIXED: Sidebar text visibility */
+    [data-testid="stSidebar"] .element-container,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] .stMarkdown {
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebar"] .stMetric label {
+        color: #e2e8f0 !important;
+    }
+    [data-testid="stSidebar"] .stMetric [data-testid="stMetricValue"] {
+        color: #ffffff !important;
+    }
+    
+    .header-container { 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem; 
+        border-radius: 20px; 
+        margin-bottom: 2rem; 
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3); 
+        text-align: center; 
+    }
     .header-title { color: white; font-size: 3rem; font-weight: bold; margin: 0; }
     .header-subtitle { color: rgba(255,255,255,0.9); font-size: 1.2rem; margin-top: 0.5rem; }
-    .status-badge { padding: 0.5rem 1rem; border-radius: 20px; font-weight: bold; }
+    .status-badge { 
+        padding: 0.5rem 1rem; 
+        border-radius: 20px; 
+        font-weight: bold; 
+        display: inline-block;
+        margin: 0.5rem 0;
+    }
     .status-ready { background: #10b981; color: white; }
     .status-loading { background: #f59e0b; color: white; }
+    
+    /* Contact form styling */
+    .contact-form {
+        background: white;
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -112,60 +153,68 @@ class SyngridAI:
         for i, line in enumerate(lines):
             low = line.lower()
             if 'madurai' in low and '625' in line and not self.company_info['india_address']:
-                block = " ".join(lines[i-2:i+5])
+                block = " ".join(lines[max(0, i-2):min(len(lines), i+5)])
                 cleaned = self.clean_address(block)
                 if 20 < len(cleaned) < 300:
                     self.company_info['india_address'] = cleaned
 
             if 'singapore' in low and re.search(r'\d{6}', line) and not self.company_info['singapore_address']:
-                block = " ".join(lines[i-2:i+5])
+                block = " ".join(lines[max(0, i-2):min(len(lines), i+5)])
                 cleaned = self.clean_address(block)
                 if 20 < len(cleaned) < 300:
                     self.company_info['singapore_address'] = cleaned
+    
     def is_valid_url(self, url, base_domain):
-        parsed = urlparse(url)
-        if parsed.netloc != base_domain:
+        try:
+            parsed = urlparse(url)
+            if parsed.netloc != base_domain:
+                return False
+            skip = [
+                r'\.pdf$', r'\.jpg$', r'\.png$', r'\.gif$', r'\.zip$',
+                r'/wp-admin/', r'/wp-includes/', r'/login', r'/register',
+                r'/cart/', r'/checkout/', r'/feed/', r'/rss/'
+            ]
+            return not any(re.search(pattern, url.lower()) for pattern in skip)
+        except:
             return False
-        skip = [
-            r'\.pdf$', r'\.jpg$', r'\.png$', r'\.gif$', r'\.zip$',
-            r'/wp-admin/', r'/wp-includes/', r'/login', r'/register',
-            r'/cart/', r'/checkout/', r'/feed/', r'/rss/'
-        ]
-        return not any(re.search(pattern, url.lower()) for pattern in skip)
 
     def extract_content(self, soup, url):
         content_dict = {'url': url, 'title': '', 'main_content': '', 'metadata': {}}
 
-        t = soup.find('title')
-        if t: content_dict['title'] = t.get_text(strip=True)
+        try:
+            t = soup.find('title')
+            if t: 
+                content_dict['title'] = t.get_text(strip=True)
 
-        meta = soup.find('meta', attrs={"name": "description"})
-        if meta and meta.get("content"):
-            content_dict['metadata']['description'] = meta["content"]
+            meta = soup.find('meta', attrs={"name": "description"})
+            if meta and meta.get("content"):
+                content_dict['metadata']['description'] = meta["content"]
 
-        full_text = soup.get_text(separator="\n", strip=True)
-        self.extract_contact_info(soup, full_text, url)
+            full_text = soup.get_text(separator="\n", strip=True)
+            self.extract_contact_info(soup, full_text, url)
 
-        for tag in soup(['script', 'style', 'nav', 'aside', 'iframe', 'noscript', 'form']):
-            tag.decompose()
+            for tag in soup(['script', 'style', 'nav', 'aside', 'iframe', 'noscript', 'form']):
+                tag.decompose()
 
-        content_selectors = [
-            "main", "article", "[role='main']", ".content",
-            ".main-content", "#content", "#main"
-        ]
-        parts = []
-        for sel in content_selectors:
-            parts.extend(soup.select(sel))
+            content_selectors = [
+                "main", "article", "[role='main']", ".content",
+                ".main-content", "#content", "#main"
+            ]
+            parts = []
+            for sel in content_selectors:
+                parts.extend(soup.select(sel))
 
-        main_content = soup.find("body") if not parts else soup.new_tag("div")
-        if parts:
-            for p in parts:
-                main_content.append(p)
+            main_content = soup.find("body") if not parts else soup.new_tag("div")
+            if parts:
+                for p in parts:
+                    main_content.append(p)
 
-        if main_content:
-            text = main_content.get_text(separator="\n", strip=True)
-            lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 20]
-            content_dict['main_content'] = "\n".join(lines)
+            if main_content:
+                text = main_content.get_text(separator="\n", strip=True)
+                lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 20]
+                content_dict['main_content'] = "\n".join(lines)
+        except Exception as e:
+            st.warning(f"Content extraction error for {url}: {str(e)}")
 
         return content_dict
 
@@ -178,7 +227,7 @@ class SyngridAI:
         for p in PRIORITY_PAGES:
             q.append(urljoin(base_url, p))
 
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
         while q and len(visited) < max_pages:
             url = q.popleft().split("#")[0].split("?")[0]
@@ -211,7 +260,7 @@ class SyngridAI:
                     if next_url not in visited and self.is_valid_url(next_url, base_domain):
                         q.append(next_url)
 
-            except Exception:
+            except Exception as e:
                 continue
 
         self.status["pages_scraped"] = len(visited)
@@ -229,8 +278,7 @@ class SyngridAI:
             all_content.insert(0, header)
 
         return ("\n\n" + "="*80 + "\n\n").join(all_content)
-
-    def get_company_contact_info(self):
+def get_company_contact_info(self):
         info = self.company_info
         if not any([info['emails'], info['phones'], info['india_address'], info['singapore_address']]):
             return "No contact details found."
@@ -249,30 +297,57 @@ class SyngridAI:
 
     def initialize(self, url, max_pages=40, progress_callback=None):
         try:
+            # Validate API key
+            if not OPENROUTER_API_KEY:
+                st.error("❌ OPENROUTER_API_KEY not found in environment variables!")
+                return False
+            
             content = self.scrape_website(url, max_pages, progress_callback)
             if len(content) < 1000:
+                st.error("❌ Insufficient content scraped. Check the website URL.")
                 return False
 
             splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1200, chunk_overlap=200,
+                chunk_size=1200, 
+                chunk_overlap=200,
                 separators=["\n\n", "\n", ". ", " "]
             )
             chunks = splitter.split_text(content)
 
+            # FIXED: HuggingFace Embeddings initialization with proper device handling
+            # This fixes the "meta tensor" error in Streamlit Cloud
             embeddings = HuggingFaceEmbeddings(
                 model_name="all-MiniLM-L6-v2",
-                model_kwargs={'device': 'cpu'},
-                encode_kwargs={'normalize_embeddings': True}
+                model_kwargs={
+                    'device': 'cpu',
+                    'trust_remote_code': False
+                },
+                encode_kwargs={
+                    'normalize_embeddings': True,
+                    'batch_size': 32
+                }
             )
 
+            # Clear any existing Chroma directory to prevent conflicts
+            chroma_dir = "./syngrid_chroma"
+            if os.path.exists(chroma_dir):
+                import shutil
+                shutil.rmtree(chroma_dir)
+
             vectorstore = Chroma.from_texts(
-                chunks, embedding=embeddings, persist_directory="./syngrid_chroma"
+                chunks, 
+                embedding=embeddings, 
+                persist_directory=chroma_dir
             )
+            
             self.retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
             self.status["ready"] = True
             return True
+            
         except Exception as e:
-            st.error(f"Initialization Error: {e}")
+            st.error(f"❌ Initialization Error: {str(e)}")
+            import traceback
+            st.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def ask(self, question):
@@ -282,35 +357,34 @@ class SyngridAI:
         q_lower = question.lower().strip()
 
         # Greeting Override 
-        greetings = ["hi", "hello", "hey", "hai", "hii", "helloo"]
+        greetings = ["hi", "hello", "hey", "hai", "hii", "helloo", "hi there", "hello there"]
         if q_lower in greetings:
             return "Hi, I'm Syngrid AI Assistant. How can I assist you?"
 
         # Contact info detection
-        contact_words = ["email", "contact", "phone", "address", "office", "location"]
+        contact_words = ["email", "contact", "phone", "address", "office", "location", "reach", "call"]
         if any(k in q_lower for k in contact_words):
             return self.get_company_contact_info()
 
+        # Check cache
         if q_lower in self.cache:
             return self.cache[q_lower]
 
         try:
             docs = self.retriever.invoke(question)
             if not docs:
-                return "I couldn't find relevant information."
+                return "I couldn't find relevant information in the scraped data."
 
             context = "\n\n".join([d.page_content for d in docs])[:4000]
 
-            prompt = f"""
-Answer the question using the context below.
+            prompt = f"""Answer the question using the context below. Be concise and helpful.
 
 Context:
 {context}
 
 Question: {question}
 
-Answer in 2–4 sentences.
-"""
+Answer in 2–4 sentences, focusing on the most relevant information."""
 
             headers = {
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -322,31 +396,45 @@ Answer in 2–4 sentences.
             payload = {
                 "model": MODEL,
                 "messages": [
-                    {"role": "system", "content": "You answer only using given context."},
+                    {"role": "system", "content": "You are a helpful assistant for Syngrid Technologies. Answer questions only using the given context."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.3
+                "temperature": 0.3,
+                "max_tokens": 500
             }
 
             r = requests.post(OPENROUTER_API_BASE, headers=headers, json=payload, timeout=60)
+            
             if r.status_code == 200:
                 ans = r.json()["choices"][0]["message"]["content"].strip()
                 self.cache[q_lower] = ans
                 return ans
-            return f"API Error: {r.status_code}"
+            else:
+                return f"⚠️ API Error ({r.status_code}): {r.text[:200]}"
 
+        except requests.exceptions.Timeout:
+            return "⚠️ Request timeout. Please try again."
+        except requests.exceptions.RequestException as e:
+            return f"⚠️ Network error: {str(e)}"
         except Exception as e:
-            return f"Error: {e}"
+            return f"⚠️ Error: {str(e)}"
 
     def save_to_db(self, question, answer):
+        db = None
         try:
             db = SessionLocal()
             db.add(ChatHistory(question=question, answer=answer))
             db.commit()
-            db.close()
-        except:
-            pass
+        except Exception as e:
+            st.warning(f"Database save error: {str(e)}")
+        finally:
+            if db:
+                db.close()
+
+
+# ==============================
 # Initialize session state
+# ==============================
 if "ai" not in st.session_state:
     st.session_state.ai = SyngridAI()
     st.session_state.initialized = False
@@ -354,7 +442,9 @@ if "ai" not in st.session_state:
     st.session_state.question_count = 0
     st.session_state.user_info_collected = False
 
+# ==============================
 # Header
+# ==============================
 st.markdown("""
 <div class="header-container">
     <h1 class="header-title">🤖 Syngrid AI Assistant</h1>
@@ -374,10 +464,10 @@ with st.sidebar:
         st.metric("Pages Scraped", st.session_state.ai.status["pages_scraped"])
         st.metric("Messages", len(st.session_state.messages))
     else:
-        st.markdown('<div class="status-badge status-loading pulse">Initializing…</div>', unsafe_allow_html=True)
+        st.markdown('<div class="status-badge status-loading">⏳ Initializing…</div>', unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("### 🗂 Download Database File")
+    st.markdown("### 🗂 Download Database")
 
     if os.path.exists("syngrid_chat.db"):
         with open("syngrid_chat.db", "rb") as f:
@@ -389,14 +479,19 @@ with st.sidebar:
                 use_container_width=True
             )
     else:
-        st.info("Database not created yet.")
+        st.info("📂 Database not created yet.")
 
     st.markdown("---")
-    st.markdown("### Quick Tools")
+    st.markdown("### 🛠 Quick Tools")
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.question_count = 0
         st.rerun()
-
+    
+    if st.button("🔄 Reinitialize AI", use_container_width=True):
+        st.session_state.initialized = False
+        st.session_state.ai = SyngridAI()
+        st.rerun()
 
 
 # ==============================
@@ -408,21 +503,21 @@ if not st.session_state.initialized:
         stat = st.empty()
 
         def cb(cur, total, url):
-            bar.progress(cur / total)
-            stat.text(f"Scraping {cur}/{total}: {url}")
+            progress = min(cur / total, 1.0)
+            bar.progress(progress)
+            stat.text(f"📄 Scraping {cur}/{total}: {url[:60]}...")
 
         ok = st.session_state.ai.initialize(SYNGRID_WEBSITE, max_pages=40, progress_callback=cb)
 
         if ok:
             st.session_state.initialized = True
             bar.progress(1.0)
-            stat.text("Initialization complete!")
-            time.sleep(1)
+            stat.success("✅ Initialization complete!")
+            time.sleep(1.5)
             st.rerun()
         else:
-            st.error("❌ Initialization failed.")
+            st.error("❌ Initialization failed. Check logs above.")
             st.stop()
-
 
 
 # ==============================
@@ -436,7 +531,7 @@ if st.session_state.initialized:
             st.markdown(msg["content"])
 
     # Chat input
-    if user_input := st.chat_input("Ask anything about Syngrid…"):
+    if user_input := st.chat_input("💬 Ask anything about Syngrid…"):
 
         # Save user message
         st.session_state.messages.append({"role": "user", "content": user_input})
@@ -445,50 +540,60 @@ if st.session_state.initialized:
 
         st.session_state.question_count += 1
 
-        # Contact form trigger
+        # Contact form trigger (after 3rd question)
         if st.session_state.question_count == 3 and not st.session_state.user_info_collected:
 
             # AI response first
             with st.chat_message("assistant"):
-                response = st.session_state.ai.ask(user_input)
+                with st.spinner("🤔 Thinking…"):
+                    response = st.session_state.ai.ask(user_input)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.session_state.ai.save_to_db(user_input, response)
 
+            # Show contact form
             st.markdown("---")
             st.markdown('<div class="contact-form">', unsafe_allow_html=True)
-            st.markdown("### 📋 Please enter your contact information")
+            st.markdown("### 📋 Please Share Your Contact Information")
+            st.markdown("*We'd love to stay connected and assist you better!*")
 
             with st.form("contact_form"):
-                name = st.text_input("Full Name *")
-                email = st.text_input("Email *")
-                phone = st.text_input("Phone *")
+                col1, col2 = st.columns(2)
+                with col1:
+                    name = st.text_input("Full Name *", placeholder="John Doe")
+                    email = st.text_input("Email *", placeholder="john@example.com")
+                with col2:
+                    phone = st.text_input("Phone *", placeholder="+91 98765 43210")
+                    st.markdown("<br>", unsafe_allow_html=True)
 
-                submit = st.form_submit_button("Submit & Continue")
+                submit = st.form_submit_button("✅ Submit & Continue", use_container_width=True)
 
                 if submit:
                     if name and email and phone:
+                        db = None
                         try:
                             db = SessionLocal()
                             db.add(UserContact(name=name, email=email, phone=phone))
                             db.commit()
-                            db.close()
 
                             st.session_state.user_info_collected = True
-                            st.success("✅ Information saved! You can continue.")
+                            st.success("✅ Information saved successfully! You can continue chatting.")
                             time.sleep(1.5)
                             st.rerun()
-                        except:
-                            st.error("Failed to save contact info.")
+                        except Exception as e:
+                            st.error(f"❌ Failed to save: {str(e)}")
+                        finally:
+                            if db:
+                                db.close()
                     else:
-                        st.error("Please fill all fields.")
+                        st.error("⚠️ Please fill all required fields.")
 
             st.markdown('</div>', unsafe_allow_html=True)
             st.stop()
 
         # Normal conversation response
         with st.chat_message("assistant"):
-            with st.spinner("Thinking…"):
+            with st.spinner("🤔 Thinking…"):
                 answer = st.session_state.ai.ask(user_input)
                 st.markdown(answer)
 
@@ -496,12 +601,13 @@ if st.session_state.initialized:
                 st.session_state.ai.save_to_db(user_input, answer)
 
 
-
+# ==============================
 # Footer
+# ==============================
 st.markdown("---")
 st.markdown("""
-<div style='text-align: center; opacity: 0.7; padding: 20px;'>
-    🤖 Syngrid AI Assistant — Powered by Streamlit & OpenRouter  
+<div style='text-align: center; opacity: 0.8; padding: 20px; color: white;'>
+    🤖 <strong>Syngrid AI Assistant</strong> — Powered by Streamlit & OpenRouter  
     <br>© 2025 Syngrid Technologies. All rights reserved.
 </div>
 """, unsafe_allow_html=True)
