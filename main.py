@@ -2,6 +2,9 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 from collections import deque
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
@@ -9,15 +12,6 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import re
 import os
 import time
-import sys
-
-# Fix for Streamlit Cloud sqlite3 issue
-__import__('pysqlite3')
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 
 # Page Configuration
 st.set_page_config(
@@ -190,18 +184,10 @@ class UserContact(Base):
 Base.metadata.create_all(bind=engine)
 
 # Configuration
-SYNGRID_WEBSITE = "https://syngrid.com/"
-
-# You can get a free API key from:
-# 1. OpenRouter: https://openrouter.ai/keys (recommended)
-# 2. Groq: https://console.groq.com (very fast & free)
-# 3. Together AI: https://api.together.xyz (free tier available)
-
-# For now, using basic keyword matching until API key is added
-USE_AI_API = False  # Set to True when you add your API key
-OPENROUTER_API_KEY = ""  # Add your API key here
+OPENROUTER_API_KEY = ""
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = "meta-llama/llama-3.2-3b-instruct:free"
+SYNGRID_WEBSITE = "https://syngrid.com/"
+MODEL = "kwaipilot/kat-coder-pro:free"
 
 PRIORITY_PAGES = [
     "", "about", "about-us", "services", "solutions", "products", 
@@ -546,13 +532,6 @@ class SyngridAI:
 
             context = "\n\n".join([doc.page_content for doc in docs])
 
-            # If API key is not set, use smart extraction from context
-            if not USE_AI_API or not OPENROUTER_API_KEY:
-                answer = self.extract_answer_from_context(question, context)
-                self.cache[q_lower] = answer
-                return answer
-
-            # Use AI API if configured
             prompt = f"""You are Syngrid AI Assistant. Answer based on the provided context about Syngrid Technologies.
 
 Context:
@@ -588,61 +567,12 @@ Provide a helpful, accurate answer in 2-4 sentences."""
                     self.cache[q_lower] = answer
                     return answer
                 else:
-                    return self.extract_answer_from_context(question, context)
+                    return "I'm having trouble generating a response. Please try again."
             else:
-                # Fallback to context extraction if API fails
-                return self.extract_answer_from_context(question, context)
+                return f"⚠️ API Error (Status {response.status_code})"
 
         except Exception as e:
-            # Fallback to context extraction on error
-            try:
-                docs = self.retriever.invoke(question)
-                context = "\n\n".join([doc.page_content for doc in docs])
-                return self.extract_answer_from_context(question, context)
-            except:
-                return f"⚠️ Error: {str(e)}"
-
-    def extract_answer_from_context(self, question, context):
-        """Smart context extraction when API is unavailable"""
-        q_lower = question.lower()
-        
-        # Split context into sentences
-        sentences = []
-        for chunk in context.split('\n'):
-            chunk = chunk.strip()
-            if len(chunk) > 50:
-                sentences.append(chunk)
-        
-        # Find most relevant sentences
-        relevant_sentences = []
-        question_words = set(q_lower.split())
-        
-        for sentence in sentences:
-            sentence_lower = sentence.lower()
-            # Count matching words
-            matches = sum(1 for word in question_words if len(word) > 3 and word in sentence_lower)
-            if matches > 0:
-                relevant_sentences.append((matches, sentence))
-        
-        # Sort by relevance
-        relevant_sentences.sort(reverse=True, key=lambda x: x[0])
-        
-        if relevant_sentences:
-            # Get top 3 most relevant sentences
-            top_sentences = [sent[1] for sent in relevant_sentences[:3]]
-            answer = " ".join(top_sentences)
-            
-            # Limit length
-            if len(answer) > 500:
-                answer = answer[:500] + "..."
-            
-            return answer
-        else:
-            # Return first few sentences from context
-            preview = " ".join(sentences[:2])
-            if len(preview) > 400:
-                preview = preview[:400] + "..."
-            return preview if preview else "I found information but couldn't extract a specific answer. Please try rephrasing your question."
+            return f"⚠️ Error: {str(e)}"
 
     def save_to_db(self, question, answer):
         try:
@@ -667,9 +597,6 @@ st.markdown("""
 <div class="header-container">
     <h1 class="header-title">🤖 Syngrid AI Assistant</h1>
     <p class="header-subtitle">Powered by Advanced AI | Instant Answers About Syngrid Technologies</p>
-    <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem; margin-top: 0.5rem;">
-        ✨ Now works without API key using smart context matching | Add optional API key in sidebar for enhanced AI
-    </p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -684,27 +611,6 @@ with st.sidebar:
         st.metric("Conversations", len(st.session_state.messages))
     else:
         st.markdown('<div class="status-badge status-loading pulse">🔄 Initializing...</div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    st.markdown("### 🔑 AI Configuration (Optional)")
-    st.markdown("**The bot works without API key using smart context matching.**")
-    
-    with st.expander("🚀 Enable Advanced AI (Optional)"):
-        st.markdown("""
-        For better answers, add a free API key:
-        - [OpenRouter](https://openrouter.ai/keys) - Free tier
-        - [Groq](https://console.groq.com) - Fast & free
-        - [Together AI](https://api.together.xyz) - Free tier
-        """)
-        
-        api_key_input = st.text_input("API Key (Optional)", type="password", placeholder="sk-or-v1-...")
-        
-        if api_key_input:
-            global OPENROUTER_API_KEY, USE_AI_API
-            OPENROUTER_API_KEY = api_key_input
-            USE_AI_API = True
-            st.success("✅ API key configured!")
     
     st.markdown("---")
     
