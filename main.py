@@ -453,7 +453,6 @@ Base.metadata.create_all(bind=engine)
 
 # Configuration
 SYNGRID_WEBSITE = "https://syngrid.com/"
-USE_AI_API = False
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "meta-llama/llama-3.2-3b-instruct:free"
