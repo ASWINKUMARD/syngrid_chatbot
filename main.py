@@ -1352,4 +1352,4 @@ def main():
         .stApp {
             max-width: 1400px;
             margin: 0 auto;
-        """}
+        }""")
