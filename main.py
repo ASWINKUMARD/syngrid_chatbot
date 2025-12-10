@@ -780,7 +780,7 @@ def render_embed_mode():
                 st.rerun()
     
     # Chat input
-    if question := st.chat_input("Type your message...")
+    if question := st.chat_input("Type your message..."):
 
 # CONTINUATION OF CHATBOT APPLICATION
 # This continues from the previous artifact
