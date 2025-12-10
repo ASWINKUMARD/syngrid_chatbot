@@ -781,12 +781,9 @@ def render_embed_mode():
     
     # Chat input
     if question := st.chat_input("Type your message..."):
-
-# CONTINUATION OF CHATBOT APPLICATION
-# This continues from the previous artifact
-
+    
 # Complete the render_embed_mode function
-def render_embed_mode_complete():
+ def render_embed_mode_complete():
     """Complete embed mode rendering (continuation)"""
     
     # ... (previous code from embed mode)
